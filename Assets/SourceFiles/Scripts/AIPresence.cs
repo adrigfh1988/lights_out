@@ -38,6 +38,10 @@ public class AIPresence : MonoBehaviour
     private AudioSource _humSource;
     private float _distanceSinceStep;
 
+    private Material _eyeMaterial;
+    private float _holdRemaining;
+    private bool _humMuted;
+
     /// <summary>Called by MazeGenerator before Awake, so the clips can come from the player prefab.</summary>
     public void Configure(AudioClip[] footsteps, AudioClip hum, Material eyeMaterialSource)
     {
@@ -67,6 +71,10 @@ public class AIPresence : MonoBehaviour
 
     private void Update()
     {
+        // Ticked before every early return below, so a Hold() during a footstep-free moment (the AI
+        // standing still, or with no footstep clips) still releases on schedule.
+        TickHold();
+
         if (_agent == null || footstepClips == null || footstepClips.Length == 0) return;
 
         // Driven by distance travelled rather than animation events: the AI's ThirdPersonController is
@@ -84,6 +92,51 @@ public class AIPresence : MonoBehaviour
         _distanceSinceStep = 0f;
         _footstepSource.pitch = Random.Range(minPitch, maxPitch);
         _footstepSource.PlayOneShot(footstepClips[Random.Range(0, footstepClips.Length)], footstepVolume);
+    }
+
+    /// <summary>
+    /// Mutes the hum for `seconds` (extends rather than restarts, so an overlapping telegraph and
+    /// breath beat both simply keep it silent until the later of the two ends), then plays one
+    /// footstep on release as the "it's back" beat.
+    /// </summary>
+    public void Hold(float seconds)
+    {
+        _holdRemaining = Mathf.Max(_holdRemaining, seconds);
+        if (_humSource != null && !_humMuted)
+        {
+            _humMuted = true;
+            _humSource.mute = true;
+        }
+    }
+
+    private void TickHold()
+    {
+        if (_holdRemaining <= 0f) return;
+
+        _holdRemaining -= Time.deltaTime;
+        if (_holdRemaining > 0f) return;
+
+        if (_humSource != null)
+        {
+            _humSource.mute = false;
+        }
+        _humMuted = false;
+
+        if (_footstepSource != null && footstepClips != null && footstepClips.Length > 0)
+        {
+            _footstepSource.pitch = Random.Range(minPitch, maxPitch);
+            _footstepSource.PlayOneShot(footstepClips[Random.Range(0, footstepClips.Length)], footstepVolume);
+        }
+    }
+
+    /// <summary>Brightens/dims the eye glow. Used by F27's second lamp-death wave.</summary>
+    public void SetEyeEmission(float emission)
+    {
+        eyeEmission = emission;
+        if (_eyeMaterial != null)
+        {
+            _eyeMaterial.SetColor("_EmissionColor", eyeColor * eyeEmission);
+        }
     }
 
     /// <summary>Stop the hum and footsteps for good. Used once the run is over.</summary>
@@ -118,6 +171,7 @@ public class AIPresence : MonoBehaviour
         eyeMaterial.EnableKeyword("_EMISSION");
         eyeMaterial.SetColor("_BaseColor", eyeColor);
         eyeMaterial.SetColor("_EmissionColor", eyeColor * eyeEmission);
+        _eyeMaterial = eyeMaterial;
 
         foreach (string boneName in new[] { "Left_Eye", "Right_Eye" })
         {

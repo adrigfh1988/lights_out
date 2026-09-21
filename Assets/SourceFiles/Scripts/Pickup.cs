@@ -5,6 +5,9 @@ public class Pickup : MonoBehaviour
 {
     public static event Action OnCoinCollected;
 
+    /// <summary>Raised with the star's world position, just before OnCoinCollected.</summary>
+    public static event Action<Vector3> OnCollectedAt;
+
     [Header("Effects")]
     public GameObject particleEffectPrefab; // Assign particle system prefab in Inspector
 
@@ -44,6 +47,10 @@ public class Pickup : MonoBehaviour
             {
                 Destroy(Instantiate(particleEffectPrefab, transform.position, Quaternion.identity), 3f);
             }
+
+            // Raised first so the hunter hears the star at the current (pre-pickup) threat level -
+            // TensionDirector.HandleProgress has not re-applied threat for this star yet.
+            OnCollectedAt?.Invoke(transform.position);
 
             // Notify listeners that a coin was collected
             OnCoinCollected?.Invoke();

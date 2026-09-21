@@ -22,6 +22,12 @@ public static class GameFlow
     /// <summary>Which floor the next maze is built for, 1 to FloorProfile.FinalFloor. Survives reloads so a retry stays on the same floor; only the main menu resets it.</summary>
     public static int CurrentFloor = 1;
 
+    /// <summary>
+    /// True while the player is in the room between floors. Not a run (lockers, capture, dread are off)
+    /// and not an ending (cursor stays locked, pause works).
+    /// </summary>
+    public static bool IsInShop;
+
     public static void Restart(bool sameMaze, int currentSeed)
     {
         SkipMenuOnLoad = true;
@@ -33,6 +39,7 @@ public static class GameFlow
     public static void NextFloor()
     {
         CurrentFloor = Mathf.Min(CurrentFloor + 1, FloorProfile.FinalFloor);
+        PlayerInventory.AdvanceFloor();
         Restart(false, 0);
     }
 
@@ -41,6 +48,8 @@ public static class GameFlow
         SkipMenuOnLoad = false;
         CurrentFloor = 1;
         PendingSeed = 0;
+        PlayerWallet.ResetCampaign();
+        PlayerInventory.ResetCampaign();
         Reload();
     }
 
@@ -56,6 +65,7 @@ public static class GameFlow
     private static void Reload()
     {
         IsRunActive = false;
+        IsInShop = false;
         // Restart can be called from the pause menu with both engaged. MainMenu.Awake zeroes the
         // clock again in the new scene anyway.
         Time.timeScale = 1f;
@@ -73,5 +83,6 @@ public static class GameFlow
         RunStartTime = 0f;
         IsRunActive = false;
         CurrentFloor = 1;
+        IsInShop = false;
     }
 }

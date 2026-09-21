@@ -35,6 +35,9 @@ public class PlayerStealthState : MonoBehaviour
     /// <summary>How far away the player can currently be heard, in metres. 0 when standing still.</summary>
     public float NoiseRadius { get; private set; }
 
+    /// <summary>Multiplies the noise radius. 1 = normal. Set once per floor from FloorProfile.NoiseScale (Quiet Shoes).</summary>
+    public float NoiseScale { get; set; } = 1f;
+
     /// <summary>Set by the flashlight so the audio director can react without knowing about it.</summary>
     public bool FlashlightOn { get; set; } = true;
 
@@ -90,6 +93,7 @@ public class PlayerStealthState : MonoBehaviour
         if (speed > sprintSpeedThreshold) target = sprintNoiseRadius;
         else if (speed > walkSpeedThreshold) target = walkNoiseRadius;
         else target = 0f;
+        target *= NoiseScale;
 
         NoiseRadius = Mathf.MoveTowards(NoiseRadius, target, sprintNoiseRadius * noiseSmoothing * Time.deltaTime);
 

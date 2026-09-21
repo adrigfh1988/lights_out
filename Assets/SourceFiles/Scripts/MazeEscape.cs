@@ -61,6 +61,12 @@ public class MazeEscape : MonoBehaviour
     public Vector3 HatchPosition => _hatchPosition;
     public bool HatchOpen { get; private set; }
 
+    /// <summary>Seconds left on the countdown. Valid even after Stop() - Stop() hides the display, it does not zero the field.</summary>
+    public float TimeLeft => Mathf.Max(0f, _timeLeft);
+
+    /// <summary>F36 Second Wind: holds the countdown without the permanent Stop(), so it can resume.</summary>
+    public bool Frozen { get; set; }
+
     /// <summary>Called by MazeGenerator once the maze and the actors exist.</summary>
     /// <summary>Per-floor countdown. Read when the hatch opens, so it can be set any time before that.</summary>
     public void SetEscapeSeconds(float seconds) { escapeSeconds = Mathf.Max(10f, seconds); }
@@ -112,7 +118,7 @@ public class MazeEscape : MonoBehaviour
 
     private void Update()
     {
-        if (!_running || _finished) return;
+        if (!_running || _finished || Frozen) return;
 
         float dt = Time.deltaTime;
         _timeLeft -= dt;
@@ -149,7 +155,7 @@ public class MazeEscape : MonoBehaviour
         if (toHatch.sqrMagnitude <= hatchTriggerRadius * hatchTriggerRadius)
         {
             DropThroughHatch();
-            _outcome.Win();
+            _outcome.FloorCleared();
             Stop();
         }
     }

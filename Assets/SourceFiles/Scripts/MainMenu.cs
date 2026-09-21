@@ -158,18 +158,20 @@ public class MainMenu : MonoBehaviour
         string rules =
             "<b>1.</b>   Collect every star hidden in the maze.\n\n" +
             "<b>2.</b>   A hatch will open somewhere. Find it before the timer runs out.\n\n" +
-            "<b>3.</b>   You are not alone down here. If it sees you, <color=#DB1F17><b>run</b></color>.";
+            "<b>3.</b>   You are not alone down here. If it sees you, <color=#DB1F17><b>run</b></color>.\n\n" +
+            "<b>4.</b>   Shards glint in the dark. Between floors, someone will sell you things for them.";
 
-        TextMeshProUGUI body = RuntimeUi.CreateText(_rulesScreen.transform, "Rules", rules, 40f, new Color(0.88f, 0.88f, 0.9f));
+        TextMeshProUGUI body = RuntimeUi.CreateText(_rulesScreen.transform, "Rules", rules, 36f, new Color(0.88f, 0.88f, 0.9f));
         body.alignment = TextAlignmentOptions.Left;
         RuntimeUi.Place(body.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, 60f), new Vector2(1100f, 380f));
 
         string controls =
-            "<b>WASD</b>  move   <b>SHIFT</b>  sprint   <b>MOUSE</b>  look   <b>F</b>  flashlight   <b>E</b>  hide\n" +
+            "<b>WASD</b>  move   <b>SHIFT</b>  sprint   <b>MOUSE</b>  look   <b>F</b>  flashlight   <b>E</b>  hide / talk\n" +
+            "<b>1</b>  spare battery   <b>2</b>  star compass   <b>ESC</b>  pause\n" +
             "<size=30>Your torch has three minutes of light in it. Your legs have less. Lockers hide you — unless it saw you climb in.</size>";
 
         TextMeshProUGUI controlText = RuntimeUi.CreateText(_rulesScreen.transform, "Controls", controls, 34f, new Color(0.62f, 0.62f, 0.66f));
-        RuntimeUi.Place(controlText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -200f), new Vector2(1400f, 130f));
+        RuntimeUi.Place(controlText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -210f), new Vector2(1400f, 170f));
 
         Button start = RuntimeUi.CreateButton(_rulesScreen.transform, "START",
             new Vector2(0f, 150f), new Vector2(420f, 90f), 44f, buttonIdle, buttonHover, Color.white);

@@ -1,16 +1,15 @@
 using System;
-using StarterAssets;
 using UnityEngine;
 
+/// <summary>
+/// Counts stars and reports progress. Everything that reacts to the count (the HUD, the hunter, the
+/// hatch, the dread beats) subscribes to the two static events below.
+/// </summary>
 public class GameManager : MonoBehaviour
 {
-    [SerializeField] private GameObject winPanel;
-    [SerializeField] private StarterAssetsInputs playerInputs;
-
     /// <summary>
-    /// Raised when the last star is collected. If anything is listening, collecting them all is no
-    /// longer the end of the game - the listener takes over. With no listener this falls back to the
-    /// original behaviour of winning immediately.
+    /// Raised when the last star is collected. MazeEscape listens and opens the hatch; if nothing is
+    /// listening (escapeSequence off), collecting them all clears the floor directly.
     /// </summary>
     public static event Action AllStarsCollected;
 
@@ -52,23 +51,15 @@ public class GameManager : MonoBehaviour
             }
             else
             {
-                WinGame();
+                ClearFloorDirectly();
             }
         }
     }
 
-    public void WinGame()
+    /// <summary>No hatch to find: hand straight to the ending code.</summary>
+    private static void ClearFloorDirectly()
     {
-        Debug.Log("You Win!");
-
-        if (winPanel != null)
-        {
-            winPanel.SetActive(true);
-        }
-
-        if (playerInputs != null)
-        {
-            playerInputs.enabled = false;
-        }
+        GameOutcome outcome = FindAnyObjectByType<GameOutcome>();
+        if (outcome != null) outcome.FloorCleared();
     }
 }

@@ -3,7 +3,7 @@ using UnityEngine;
 /// <summary>
 /// Every number that makes a floor harder, in one place. Difficulty here is not Easy/Medium/Hard, it
 /// is how far into the game the player is: floor 1 is a gentle walk in a small, lit maze, and the
-/// final floor is the game exactly as it was tuned before floors existed.
+/// final floor keeps the pre-floors gameplay tuning; its look comes from theme 5.
 ///
 /// Each value is a pair, "first floor" and "final floor", blended by <see cref="Blend"/>. To make the
 /// early game kinder or the late game crueller, change the pair - nothing else needs to know.
@@ -18,6 +18,9 @@ public class FloorProfile
     /// <summary>0 on the first floor, 1 on the final one.</summary>
     public float Progress { get; private set; }
 
+    /// <summary>Which FloorThemeSet row the maze clones. The themes' looks are authored in the scene; this is only the floor-to-theme mapping.</summary>
+    public int ThemeIndex;
+
     // ---- world
     public int Width, Height;
     public int StarCount;
@@ -25,6 +28,8 @@ public class FloorProfile
     public int CellsPerLamp;
     public float LampIntensity;
     public float LampRange;
+    /// <summary>Glowing shards hidden in the maze's nooks (F31). Never set by For(); Quiet Shoes touches NoiseScale, not this.</summary>
+    public int ShardCount;
 
     // ---- light
     public Color Ambient;
@@ -45,23 +50,35 @@ public class FloorProfile
     public float PatrolBias;
     public float SearchBudget;
 
+    // ---- dread
+    /// <summary>Seconds between relocations (F23). Also floored at a hard 20 s minimum in DreadDirector.</summary>
+    /// <summary>How close a relocation may appear along the player's trail at full progress (m).</summary>
+    public float RelocateNearDistance;
+    /// <summary>Mean seconds between phantoms (F26).</summary>
+    public float PhantomInterval;
+
+    /// <summary>Footstep noise multiplier. Never set here - only PlayerInventory.ApplyActiveModifiers (Quiet Shoes) touches it.</summary>
+    public float NoiseScale = 1f;
+
     public static FloorProfile For(int floor)
     {
         floor = Mathf.Clamp(floor, 1, FinalFloor);
         float t = FinalFloor > 1 ? (floor - 1) / (float)(FinalFloor - 1) : 1f;
 
-        FloorProfile p = new FloorProfile { Floor = floor, Progress = t };
+        FloorProfile p = new FloorProfile { Floor = floor, Progress = t, ThemeIndex = floor };
 
         // Pairs are (first floor, final floor). The final-floor values are the shipped tuning.
         p.Width = Blend(7, 11, t);
         p.Height = p.Width;
         p.StarCount = Blend(2, 5, t);
         p.LockerCount = Blend(5, 10, t);
-        p.CellsPerLamp = Blend(2, 5, t);
-        p.LampIntensity = Blend(1.9f, 1.1f, t);
-        p.LampRange = Blend(9f, 7f, t);
+        // Final-floor lamps were 1 per 5 cells at 1.1 - too dark to read the maze once F27 has killed
+        // two waves of them. Denser and a little brighter; the fog still hides the far end of a hall.
+        p.CellsPerLamp = Blend(2, 3, t);
+        p.LampIntensity = Blend(1.9f, 1.5f, t);
+        p.LampRange = Blend(9f, 8f, t);
 
-        float ambient = Blend(0.10f, 0.02f, t);
+        float ambient = Blend(0.10f, 0.035f, t);
         p.Ambient = new Color(ambient, ambient, ambient * 1.25f);
         p.FogDensity = Blend(0.03f, 0.07f, t);
 
@@ -80,13 +97,18 @@ public class FloorProfile
         p.PatrolBias = Blend(0.2f, 0.6f, t);
         p.SearchBudget = Blend(6f, 12f, t);
 
+        p.RelocateNearDistance = Blend(11f, 7f, t);
+        p.PhantomInterval = Blend(45f, 18f, t);
+
+        p.ShardCount = Blend(4, 8, t);
+
         return p;
     }
 
     public override string ToString()
     {
         return $"floor {Floor}/{FinalFloor}: {Width}x{Height}, {StarCount} stars, {LockerCount} lockers, " +
-               $"hunter walk {WalkSpeed:0.0} run {RunSpeed:0.0} sees {ViewDistance:0}m, escape {EscapeSeconds:0}s";
+               $"hunter walk {WalkSpeed:0.0} run {RunSpeed:0.0} sees {ViewDistance:0}m, escape {EscapeSeconds:0}s, {ShardCount} shards";
     }
 
     private static float Blend(float first, float final, float t) => Mathf.Lerp(first, final, t);

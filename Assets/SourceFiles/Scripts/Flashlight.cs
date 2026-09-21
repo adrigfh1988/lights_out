@@ -38,8 +38,15 @@ public class Flashlight : MonoBehaviour
 
     private Light _light;
     private PlayerStealthState _stealth;
+    private float _stutterRemaining;
 
     public bool IsOn { get; private set; } = true;
+
+    /// <summary>The beam's reach, for anything that wants to know if it just caught something.</summary>
+    public float Range => range;
+
+    /// <summary>Full width of the lit cone.</summary>
+    public float OuterAngle => outerAngle;
 
     /// <summary>Ignore the toggle key while false: under the pause menu, and through an ending.</summary>
     public bool InputEnabled = true;
@@ -68,6 +75,30 @@ public class Flashlight : MonoBehaviour
     public void ForceOff()
     {
         SetOn(false);
+    }
+
+    /// <summary>Shop cosmetic: recolours the beam for the rest of the campaign.</summary>
+    public void SetBeamColor(Color color)
+    {
+        beamColor = color;
+        if (_light != null) _light.color = color;
+    }
+
+    /// <summary>Spare Battery: a full cell. Switches the torch on - you just loaded it, it is on.</summary>
+    public void Refill()
+    {
+        SecondsLeft = batterySeconds;
+        SetOn(true);
+    }
+
+    /// <summary>
+    /// A DreadDirector telegraph beat: makes the beam waver hard for `seconds`, ignored while off or
+    /// dead. A flag read in Update rather than a one-off write, since Update rewrites intensity every
+    /// frame anyway.
+    /// </summary>
+    public void Stutter(float seconds)
+    {
+        _stutterRemaining = Mathf.Max(_stutterRemaining, seconds);
     }
 
     /// <summary>
@@ -116,6 +147,10 @@ public class Flashlight : MonoBehaviour
 
     private void Update()
     {
+        // Decremented every frame, on or off, so a stutter queued while the torch happens to be off
+        // cannot linger and fire later once it is switched on.
+        _stutterRemaining = Mathf.Max(0f, _stutterRemaining - Time.deltaTime);
+
         // Scaled deltaTime: the drain freezes for free behind the title screen and under pause.
         if (IsOn && !IsDead)
         {
@@ -137,12 +172,15 @@ public class Flashlight : MonoBehaviour
 
         if (IsOn)
         {
-            float amount = IsLow ? Mathf.Lerp(dyingFlickerAmount, flickerAmount, Charge / lowBatteryFraction) : flickerAmount;
+            bool stuttering = _stutterRemaining > 0f;
+            float amount = stuttering ? 0.75f
+                : IsLow ? Mathf.Lerp(dyingFlickerAmount, flickerAmount, Charge / lowBatteryFraction)
+                : flickerAmount;
             float flicker = amount > 0f ? 1f - amount + amount * Mathf.PerlinNoise(Time.time * flickerSpeed, 0f) : 1f;
             float dyingScale = Mathf.Lerp(dyingIntensityFraction, 1f, Mathf.Clamp01(Charge / lowBatteryFraction));
 
             float finalIntensity = intensity * flicker * dyingScale;
-            if (Charge < 0.05f && Mathf.PerlinNoise(Time.time * 3f, 7f) > 0.8f) finalIntensity = 0f;
+            if ((Charge < 0.05f || stuttering) && Mathf.PerlinNoise(Time.time * 3f, 7f) > 0.8f) finalIntensity = 0f;
 
             _light.intensity = finalIntensity;
         }

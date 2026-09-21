@@ -18,19 +18,25 @@ public class PauseMenu : MonoBehaviour
     private Flashlight _flashlight;
     private MainMenu _menu;
     private GameOutcome _outcome;
+    private ShopMenu _shopMenu;
     private int _seed;
 
     private GameObject _panel;
+    private Button _restartButton;
     private bool _paused;
 
-    /// <summary>Flashlight and menu may be null: no first-person rig, or no title screen.</summary>
-    public void Configure(Transform player, Flashlight flashlight, MainMenu menu, GameOutcome outcome, int seed)
+    /// <summary>True while the pause panel is up.</summary>
+    public bool IsPaused => _paused;
+
+    /// <summary>Flashlight, menu and shopMenu may be null: no first-person rig, no title screen, or no shop.</summary>
+    public void Configure(Transform player, Flashlight flashlight, MainMenu menu, GameOutcome outcome, int seed, ShopMenu shopMenu)
     {
         _player = player;
         _flashlight = flashlight;
         _menu = menu;
         _outcome = outcome;
         _seed = seed;
+        _shopMenu = shopMenu;
     }
 
     private void Update()
@@ -55,10 +61,14 @@ public class PauseMenu : MonoBehaviour
 
     private bool CanPause()
     {
-        if (!GameFlow.IsRunActive) return false;
+        // The shop is a third phase (decision 5): not a run, but pausing still works there.
+        if (!GameFlow.IsRunActive && !GameFlow.IsInShop) return false;
         if (_menu != null && _menu.IsOpen) return false;
         if (GameOutcome.IsOver) return false;
         if (_outcome != null && _outcome.IsEnding) return false;
+        // The Esc that closes the shop panel must not also open the pause menu in the same frame -
+        // Update order between the two components is not defined.
+        if (_shopMenu != null && (_shopMenu.IsOpen || _shopMenu.ClosedThisFrame)) return false;
         return true;
     }
 
@@ -73,6 +83,8 @@ public class PauseMenu : MonoBehaviour
         if (_flashlight != null) _flashlight.InputEnabled = false;
 
         if (_panel == null) BuildPanel();
+        // Replaying a cleared floor from the shop would re-earn its payout (decision 4c).
+        if (_restartButton != null) _restartButton.gameObject.SetActive(!GameFlow.IsInShop);
         _panel.SetActive(true);
         _panel.transform.SetAsLastSibling();
 
@@ -88,7 +100,8 @@ public class PauseMenu : MonoBehaviour
         AudioListener.pause = false;
 
         PlayerLock.Freeze(_player, false);
-        if (_flashlight != null) _flashlight.InputEnabled = true;
+        // The shop is lit; the torch stays off and disabled there for the whole phase.
+        if (_flashlight != null) _flashlight.InputEnabled = !GameFlow.IsInShop;
         PlayerLock.SetCursorFree(false);
     }
 
@@ -118,9 +131,9 @@ public class PauseMenu : MonoBehaviour
             new Vector2(0f, 400f), size, 40f, ButtonIdle, ButtonHover, Color.white);
         resume.onClick.AddListener(Resume);
 
-        Button restart = RuntimeUi.CreateButton(_panel.transform, "RESTART MAZE",
+        _restartButton = RuntimeUi.CreateButton(_panel.transform, "RESTART MAZE",
             new Vector2(0f, 290f), size, 40f, ButtonIdle, ButtonHover, Color.white);
-        restart.onClick.AddListener(() => GameFlow.Restart(true, _seed));
+        _restartButton.onClick.AddListener(() => GameFlow.Restart(true, _seed));
 
         Button menu = RuntimeUi.CreateButton(_panel.transform, "MAIN MENU",
             new Vector2(0f, 180f), size, 40f, ButtonIdle, ButtonHover, Color.white);

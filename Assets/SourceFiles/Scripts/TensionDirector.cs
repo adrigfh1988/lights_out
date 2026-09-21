@@ -19,8 +19,15 @@ public class TensionDirector : MonoBehaviour
     [Tooltip("The counter bleeds toward this as the last stars come in")]
     [SerializeField] private Color alarmedColor = new Color(0.9f, 0.15f, 0.1f);
 
+    [Header("Star noise")]
+    [Tooltip("How far the sound of a star being taken carries at zero progress (m, path distance, before the floor's hearing scale)")]
+    [SerializeField] private float starNoiseRadius = 14f;
+    [Tooltip("...at full progress. 34 m is most of an 11x11 maze: by the last star the hunter always comes.")]
+    [SerializeField] private float starNoiseRadiusAtPeak = 34f;
+
     private AIFollower _follower;
     private HorrorAudioDirector _audio;
+    private PlayerHud _hud;
 
     private TextMeshProUGUI _counter;
     private int _collected;
@@ -34,22 +41,43 @@ public class TensionDirector : MonoBehaviour
         Apply();
     }
 
+    /// <summary>Wired separately: SetUpAtmosphere builds the HUD after this director's Configure call.</summary>
+    public void BindHud(PlayerHud hud)
+    {
+        _hud = hud;
+    }
+
+    /// <summary>Shop cosmetic (F35): recolours the calm end of the counter. The alarmed end is unchanged.</summary>
+    public void SetCalmColor(Color color)
+    {
+        calmColor = color;
+        Apply();
+    }
+
     private void OnEnable()
     {
         GameManager.ProgressChanged += HandleProgress;
         GameManager.AllStarsCollected += HandleHatchOpen;
+        Pickup.OnCollectedAt += HandleStarTaken;
     }
 
     private void OnDisable()
     {
         GameManager.ProgressChanged -= HandleProgress;
         GameManager.AllStarsCollected -= HandleHatchOpen;
+        Pickup.OnCollectedAt -= HandleStarTaken;
     }
 
     private void Start()
     {
         BuildCounter();
         Apply();
+    }
+
+    private void Update()
+    {
+        // Hidden in the shop (decision 5): the shop panel shows the wallet instead.
+        if (_counter != null) _counter.gameObject.SetActive(!GameFlow.IsInShop);
     }
 
     private float Progress => _total > 0 ? _collected / (float)_total : 0f;
@@ -67,6 +95,22 @@ public class TensionDirector : MonoBehaviour
         Apply();
 
         if (_audio != null) _audio.BeginPanic();
+    }
+
+    /// <summary>
+    /// Fired by Pickup before OnCoinCollected/ProgressChanged, so Progress here is "before this star" -
+    /// the star you just took is heard at the current (lower) radius, the next one is louder.
+    /// </summary>
+    private void HandleStarTaken(Vector3 at)
+    {
+        if (_follower == null) return;
+
+        float radius = Mathf.Lerp(starNoiseRadius, starNoiseRadiusAtPeak, Progress);
+        bool heard = _follower.HearNoise(at, radius);
+        if (heard && _hud != null && Progress >= 0.5f)
+        {
+            _hud.ShowSubtitle("It heard that.", 2.2f);
+        }
     }
 
     private void Apply()

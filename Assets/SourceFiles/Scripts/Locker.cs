@@ -25,6 +25,18 @@ public class Locker : MonoBehaviour, IHidingSpot
     [SerializeField] private float doorOpenDegrees = 110f;
     [SerializeField] private float doorOpenSeconds = 0.25f;
 
+    [Header("Themed prefab wiring")]
+    [Tooltip("The door's hinge pivot. Opened by rotating local Y by doorOpenDegrees, so the hinge edge must sit at local (0,0,0) of this transform. Body keeps its own collider; total locker depth must stay <= 0.7 m or the 0.5 m player clips through the cell centre.")]
+    [SerializeField] private Transform door;
+    [Tooltip("Where the player stands once hidden. Keep at least 0.3 m clear of the body's inside faces - the CharacterController is 0.5 m wide and would otherwise clip out.")]
+    [SerializeField] private Transform insideAnchor;
+    [Tooltip("Where the player stands when they leave, roughly 1 m in front of the door.")]
+    [SerializeField] private Transform frontAnchor;
+
+    public Transform Door => door;
+    public Transform InsideAnchor => insideAnchor;
+    public Transform FrontAnchor => frontAnchor;
+
     private Vector3 _insidePosition;
     private float _facingYaw;
     private Transform _door;
@@ -175,6 +187,12 @@ public class Locker : MonoBehaviour, IHidingSpot
             _stealth.SetHidden(null);
             _stealth.LastExposed = true;
         }
+    }
+
+    /// <summary>Second Wind after a locker bust: Expose() left the player inside with movement locked. Full exit.</summary>
+    public void ForceLeave()
+    {
+        if (Occupied) Leave();
     }
 
     private IEnumerator OpenDoor()

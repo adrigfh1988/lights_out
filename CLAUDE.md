@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project
 
-**LIGHTS OUT** — a first-person horror maze game. Unity 6 (editor `6000.6.2f1`), URP. It started life as the "Unity Essentials" / Get Started tutorial (a third-person robot collecting stars) and the tutorial assets are still in the project, but the game is now: you are dropped into a dark procedural maze with a flashlight, you collect 5 stars while something hunts you, and then you have 60 seconds to find the escape hatch.
+**LIGHTS OUT** — a first-person horror maze game. Unity 6 (editor `6000.6.2f1`), URP. It started life as the "Unity Essentials" / Get Started tutorial (a third-person robot collecting stars); the tutorial content has been removed, but the robot and Starter Assets controller are still the player. The game is now: you are dropped into a dark procedural maze with a flashlight, you collect 5 stars while something hunts you, and then you have 60 seconds to find the escape hatch.
 
 Not a git repository. There is no test suite and no assembly definitions under `Assets/`, so all game code compiles into `Assembly-CSharp`.
 
@@ -24,7 +24,9 @@ Only scene in build settings: `Assets/Scenes/GetStarted_Scene.unity`. No tests e
 
 ## The one thing to understand first
 
-**Almost nothing is authored in the scene.** `MazeGenerator.Awake` (`[DefaultExecutionOrder(-100)]`) builds the entire game at runtime: walls, floor, ceiling, the NavMesh bake, the stars, the first-person rig, the flashlight, and every director component, each `AddComponent`-ed onto the `MazeGenerator` GameObject and wired with a `Configure`/`Bind` call. The only authored pieces left are `GameManager.winPanel` and the tutorial's `Remaining_Collectibles_UI.prefab`.
+**Almost nothing is authored in the scene.** `MazeGenerator.Awake` (`[DefaultExecutionOrder(-100)]`) builds the entire game at runtime: walls, floor, ceiling, the NavMesh bake, the stars, the first-person rig, the flashlight, and every director component, each `AddComponent`-ed onto the `MazeGenerator` GameObject and wired with a `Configure`/`Bind` call. The main authored piece is **the shop room**: a `ShopRoom` object at (−92, 5, −45), west of the maze, that is real scene geometry you can select and edit. It is generated once by the editor menu item **LIGHTS OUT > Build Shop Room** (`Assets/Editor/ShopRoomBuilder.cs`; materials in `Assets/SourceFiles/Materials/Shop`). Without it `MazeGenerator` logs an error and clearing floors 1–4 falls back to a plain win.
+
+The second authored piece is **the floor-theme gallery** (F41): a `FloorThemes` object north of the maze at (−70, 5, −6) with one `FloorTheme` row per floor, each holding live prefab instances of that floor's wall, pillar, floor tile, ceiling tile, lamp, locker and props. Generated once by **LIGHTS OUT > Build Floor Themes** (`Assets/Editor/FloorThemeBuilder.cs`; assets under `Assets/SourceFiles/Themes/<n>_<Name>/`, never overwritten on a rebuild unless you choose *Replace everything*). At Play, `MazeGenerator.ResolveTheme` picks the row for `FloorProfile.ThemeIndex` and **clones the scene instances** (so unapplied overrides count), then deactivates the gallery. Without it, or with an incomplete row, it logs an error and builds the old primitive maze. Look owns colour, fixtures and prop density (`FloorTheme`); gameplay numbers such as lamp intensity and range stay in `FloorProfile`. Spec: `plannings/floor-themes-plan.md`.
 
 So: **do not look for Inspector wiring or prefabs to explain behaviour, and do not add setup to the scene.** Read `MazeGenerator.SetUpAtmosphere` (near the end of the file) — that method is the composition root. New systems get created and configured there.
 
@@ -42,12 +44,13 @@ Execution order matters and is set explicitly:
 
 1. `MainMenu` opens with `Time.timeScale = 0`; `StartGame` unfreezes, sets `GameFlow.RunStartTime` and `GameFlow.IsRunActive = true`.
 2. `Pickup.OnTriggerEnter` (Player tag) → static `Pickup.OnCoinCollected` → `GameManager` decrements and raises `GameManager.ProgressChanged(collected, total)`.
-3. Last star → `GameManager.AllStarsCollected`. **If anything is subscribed, that listener takes over**; only with no listener does `GameManager.WinGame` fall back to the tutorial's win panel. `MazeEscape` and `TensionDirector` both subscribe.
+3. Last star → `GameManager.AllStarsCollected`. **If anything is subscribed, that listener takes over**; only with no listener does `GameManager` call `GameOutcome.FloorCleared` directly. `MazeEscape` and `TensionDirector` both subscribe.
 4. `MazeEscape` opens a glowing hatch at least 12 m away, starts a 60 s countdown, and builds a landing platform underneath it.
 5. Ending, always through `GameOutcome`:
-   - reach the hatch → `MazeEscape.DropThroughHatch()` then `GameOutcome.Win()`
+   - reach the hatch on floors 1–4 → `MazeEscape.DropThroughHatch()` then `GameOutcome.FloorCleared()`: blackout during the fall, teleport into `ShopRoom`, a payout ledger, CONTINUE → `GameFlow.IsInShop = true` until the player walks through the door (E) → `GameFlow.NextFloor()`.
+   - reach the hatch on floor 5 → `GameOutcome.Win()` — the ending, with the campaign total.
    - timer expires → `GameOutcome.Lose(LoseReason.OutOfTime)`
-   - hunter catches you → `AIFollower.PlayerCaught` → `GameOutcome.Lose(LoseReason.Caught)` → `CaptureSequence` coroutine (camera eases onto its eyes, torch flickers out, blackout) → end screen.
+   - hunter catches you → `AIFollower.PlayerCaught` → holding a Second Wind, `GameOutcome.SecondWindSequence` (cut to black, hunter warped away and stunned, player freed) instead; otherwise `GameOutcome.Lose(LoseReason.Caught)` → `CaptureSequence` coroutine (camera eases onto its eyes, torch flickers out, blackout) → end screen.
 
 `GameOutcome` is single-shot: `IsOver` / `IsEnding` guard every entry point, so a hatch drop landing mid-capture is ignored.
 
@@ -58,17 +61,19 @@ Execution order matters and is set explicitly:
 - **Hunter** — `AIFollower` (~830 lines): sight cone + LOS, hearing, last-known-position search sweep, patrol bias toward uncollected stars, wander points, `SetThreatLevel(progress, hunting)` escalation dial. States: `Chase`, `Wander`, `Search`, `Captured`. Events: `ChaseStateChanged(bool)`, `PlayerCaught`.
 - **Dread layer** — `AIPresence` (occlusion-free footsteps/hum + emissive eyes), `HorrorAudioDirector` (distance heartbeat, sting, drone, panic track, `PlayCaptureSting`, `Silence`), `HorrorAtmosphere` (ambient/fog/skybox blackout).
 - **Escalation** — `TensionDirector` is the single place where "the maze getting emptier makes things worse" is expressed: counter colour, audio intensity, AI threat level.
+- **Relocation + reactive maze** — `DreadDirector` (no execution-order attribute; subscribes in `OnEnable`, wired in `SetUpAtmosphere` after `outcome` exists): telegraphed hunter relocation along the player's own trail, subtitles, and F27's lamp ripples/deaths, atmosphere darkening and the last-star silence.
+- **Phantoms** — `PhantomDirector` (same wiring pattern as `DreadDirector`): scheduled, gameplay-inert fakes (silhouette, footsteps-behind, a lamp dying, a whisper) that never fire near the hunter or during a `DreadDirector` telegraph.
+- **Economy / shop** — `ShopCatalogue` (static item/price data), `PlayerWallet` (static Shards wallet, payouts, anti-farm caps), `PlayerInventory` (static held items, next-floor modifiers, cosmetics), `ShardPickup` (maze currency, deliberately not a `Pickup`), `ShopRoom` (drives the authored room between floors: counter, salesman, door; parts are serialized references, not built at runtime), `ShopMenu` (the 3×3 buying panel), `ConsumableController` (spare battery / star compass hotkeys 1 / 2).
 - **Flow / shell** — `GameFlow` (static: `SkipMenuOnLoad`, `PendingSeed`, `RunStartTime`, `IsRunActive`, `Restart(sameMaze, seed)`, `ReturnToMenu`, `Quit`), `PlayerLock` (static freeze + cursor helpers), `MainMenu`, `PauseMenu` (Esc / gamepad Start), `GameOutcome` (end screens with retry buttons), `RuntimeUi` (all UI is built in code — `CreatePanel`, `CreateText`, `CreateButton`, `Place`, `ResolveCanvas`, `EnsureEventSystem`).
 
 ## Gotchas that bite
 
-- **Statics must survive a scene reload and must not survive Play mode.** `GameFlow` and `GameOutcome.IsOver` both have a `[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]` reset, because with *Enter Play Mode > Reload Domain* disabled a stale `SkipMenuOnLoad` would skip the title screen on the next run. Any new static run state needs the same treatment.
+- **Statics must survive a scene reload and must not survive Play mode.** `GameFlow` and `GameOutcome.IsOver` both have a `[RuntimeInitializeOnLoadMethod(SubsystemRegistration)]` reset, because with *Enter Play Mode > Reload Domain* disabled a stale `SkipMenuOnLoad` would skip the title screen on the next run. `GameFlow.IsInShop`, `PlayerWallet` and `PlayerInventory` all have the same reset, and are also cleared in `GameFlow.ReturnToMenu` — the economy lives for one campaign only. Any new static run state needs the same treatment.
+- **`ShardPickup` is deliberately not a `Pickup`.** `GameManager.Start` counts `Pickup` objects as stars; a shard sharing that type would corrupt the star count and could fire `AllStarsCollected` early.
 - **Every static-event subscriber unsubscribes** in `OnDestroy`/`OnDisable` (`GameManager`, `MazeEscape`, `TensionDirector`, `HorrorAudioDirector`, `GameOutcome`). Restart is a plain `SceneManager.LoadScene`, so a missed unsubscribe leaks across reloads. Keep the pattern.
 - **`Time.time` is the run clock** and stands still at `timeScale = 0`, which is why run time is net of menu and pause. Don't swap it for `Time.unscaledTime`.
 - **The cursor fight.** `StarterAssetsInputs` re-locks the cursor on every focus change, so anything showing a menu calls `PlayerLock.SetCursorFree(true)` *every frame*, not once. Freezing the player is three flags (`MovementLocked`, `LockCameraPosition`, `cursorLocked`) — always go through `PlayerLock.Freeze`.
 - **Capture needs sight, not just distance.** A bare radius test captures through a wall (two actors either side of a 0.5 m wall are ~1.5 m apart), and `Update` still ticks at `timeScale = 0` behind the title screen — hence the `GameFlow.IsRunActive && _hasSight` gate in `AIFollower`.
-- **Reflection is load-bearing in two places.** `RespawnPlayer` zeroes `ThirdPersonController`'s private `_verticalVelocity`, and `UpdateCollectibleCount` resolves `Type.GetType("Pickup")`. Renaming either silently breaks them at runtime with no compile error.
-- **`UpdateCollectibleCount` recounts `Pickup` objects every frame** via `FindObjectsByType` instead of listening to `ProgressChanged`. It is tutorial-era; `TensionDirector`'s counter is the real HUD.
 - **`GameManager` counts stars at `Start`.** Anything spawning or removing stars after that desyncs the count.
 - **Input System only** (`activeInputHandler: 1`). Keep the `#if ENABLE_INPUT_SYSTEM` guards in `ThirdPersonController` / `StarterAssetsInputs`. Note `Flashlight` and `PauseMenu` read `Keyboard.current` / `Gamepad.current` directly and bypass the action map, so those bindings are not remappable yet.
 - Keep `.meta` files alongside assets when moving or renaming; scenes and prefabs are text-serialized YAML, so hand edits must preserve GUID references.
@@ -84,6 +89,8 @@ Execution order matters and is set explicitly:
 
 ## Non-game assets
 
-- `Assets/Tutorials/` and `Assets/SourceFiles/Models|Animation|Materials|...` are tutorial/content assets (`com.unity.learn.iet-framework`; `Assets/Tutorials/Settings/Editor/TutorialCallbacks.cs` and `Styles/ApplyCustomThemeHelper.cs` are editor-side helpers).
+- The Unity Essentials tutorial itself is gone: `Assets/Tutorials/`, the `com.unity.learn.iet-framework` package, `UpdateCollectibleCount` and the collectibles UI prefab, and `GameManager`'s win panel are deleted. `Assets/SourceFiles/Models|Animation|Materials|...` are content assets the game still uses.
+- Removed by the editor menu item **LIGHTS OUT > Remove Tutorial Leftovers** (`Assets/Editor/TutorialCleanup.cs`, delete it after running): the tutorial props in the scene, `RespawnPlayer` on the `PlayerRobot` prefabs, `MotionAudioController`, and the Moving_Platform / Stairs / Wall_Light prefabs. If that file still exists, those are still in the project.
+- `Background_Ambient_Sci-Fi` (scene prefab) is **not** tutorial clutter: `MazeGenerator.TakeOverSceneAmbience` uses its looping clip as the hunter's hum.
 - Render settings: URP with `PC_RPAsset`/`Mobile_RPAsset` in `Assets/SourceFiles/Settings/`.
-- Tutorial leftovers still in the build: `GameManager.winPanel`, `Remaining_Collectibles_UI.prefab`, `MotionAudioController`, `RespawnPlayer`, and the third-person `PlayerRobot.prefab`s.
+- The player is still the third-person `PlayerRobot.prefab` (two copies) with `FirstPerson = true`; the AI's body is an instance of it.

@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using StarterAssets;
 using Unity.AI.Navigation;
@@ -56,6 +57,8 @@ public class MazeGenerator : MonoBehaviour
     [SerializeField] private bool starLights = true;
     [SerializeField] private float starLightRange = 5f;
     [SerializeField] private float starLightIntensity = 1.5f;
+    [Tooltip("Used only when useFloorProfile is off; otherwise FloorProfile.ShardCount wins")]
+    [SerializeField] private int shardCount = 6;
 
     [Header("Atmosphere")]
     [SerializeField] private bool firstPerson = true;
@@ -80,7 +83,7 @@ public class MazeGenerator : MonoBehaviour
     [Header("Floors")]
     [Tooltip("Scale the maze, hunter, light and timers to how far into the game the player is (see FloorProfile). Off = use the values in this Inspector as they are.")]
     [SerializeField] private bool useFloorProfile = true;
-    [Tooltip("For testing: force a floor from 1 to 5 without playing up to it. 0 = follow the game.")]
+    [Tooltip("For testing: start a fresh run on this floor (1 to 5) without playing up to it. The game carries on from there - the shop door still leads to the next floor. 0 = start on floor 1.")]
     [SerializeField] private int debugFloor = 0;
 
     [Header("Lockers")]
@@ -92,6 +95,12 @@ public class MazeGenerator : MonoBehaviour
     [SerializeField] private float lockerHeight = 2.1f;
     [SerializeField] private Color lockerTint = new Color(0.16f, 0.17f, 0.19f);
 
+    [Header("Debug")]
+    [Tooltip("For testing the shop: deposited into the wallet when the maze is built.")]
+    [SerializeField] private int debugShards = 0;
+    [Tooltip("For testing: skip the title screen and open the floor as if the hatch had just been reached.")]
+    [SerializeField] private bool debugStartInShop = false;
+
     [Header("Wall lamps")]
     [SerializeField] private bool wallLamps = true;
     [Tooltip("Roughly one lamp per this many cells, plus one above every locker")]
@@ -102,6 +111,12 @@ public class MazeGenerator : MonoBehaviour
     [SerializeField] private float lampIntensity = 1.1f;
     [Range(0f, 1f)]
     [SerializeField] private float faultyLampChance = 0.25f;
+
+    [Header("Themes")]
+    [Tooltip("Scene gallery built by LIGHTS OUT > Build Floor Themes. Found automatically; assign only to override.")]
+    [SerializeField] private FloorThemeSet themeSet;
+    [Tooltip("Combine the static themed geometry (walls, pillars, floor, ceiling) after the navmesh bake. Off until profiled.")]
+    [SerializeField] private bool staticBatchThemedGeometry = false;
 
     // Wall flags per cell. The west/south walls are the ones actually built; the east wall of cell
     // (x, z) is the west wall of (x + 1, z), so carving a passage clears both sides.
@@ -116,6 +131,8 @@ public class MazeGenerator : MonoBehaviour
     private Transform _mazeRoot;
     private readonly List<Vector3> _cellCenters = new List<Vector3>();
     private readonly List<Transform> _stars = new List<Transform>();
+    /// <summary>Cells SpawnStars chose. Kept so SpawnShards can stay clear of them.</summary>
+    private readonly List<Vector2Int> _starCells = new List<Vector2Int>();
     private readonly List<Material> _runtimeMaterials = new List<Material>();
     private readonly List<Vector2Int> _lockerCells = new List<Vector2Int>();
     // Direction from a locker cell's centre toward the wall its locker stands against
@@ -127,11 +144,22 @@ public class MazeGenerator : MonoBehaviour
     private Material _floorMat;
     private Material _ceilingMat;
 
+    private FloorTheme _theme;
+    private Transform _wallsGroup, _pillarsGroup, _floorGroup, _ceilingGroup, _lampsGroup, _lockersGroup, _propsGroup;
+    /// <summary>Wall directions already taken by a wall prop, per cell. Consulted by BuildCeilingProps (no double-dressing a cell) and SpawnShards (no shard clipping a prop).</summary>
+    private readonly Dictionary<Vector2Int, List<Vector3>> _propWalls = new Dictionary<Vector2Int, List<Vector3>>();
+
+    /// <summary>The theme this maze was built from, or null when the primitive fallback was used.</summary>
+    public FloorTheme Theme => _theme;
+
     /// <summary>The spawned stars. Entries become null as they are collected.</summary>
     public IReadOnlyList<Transform> Stars => _stars;
 
     /// <summary>Every locker built for this maze.</summary>
     public IReadOnlyList<Locker> Lockers => _lockers;
+
+    /// <summary>Every wall lamp built for this maze.</summary>
+    public IReadOnlyList<WallLamp> Lamps => _lamps;
 
     /// <summary>Floor-level world centre of every cell, row-major (x + z * width).</summary>
     public IReadOnlyList<Vector3> CellCenters => _cellCenters;
@@ -158,7 +186,15 @@ public class MazeGenerator : MonoBehaviour
             return;
         }
 
-        ApplyFloorProfile();
+        // A fresh start is one the title screen will front; a reload from the shop door or a retry
+        // arrives with SkipMenuOnLoad already set. Read before the debug toggle below sets it too.
+        bool freshStart = !GameFlow.SkipMenuOnLoad;
+
+        // Debug affordance: skip the title screen so a shop iteration does not cost a full floor.
+        if (debugStartInShop) GameFlow.SkipMenuOnLoad = true;
+
+        ApplyFloorProfile(freshStart);
+        ResolveTheme();
 
         // Saved scenes carry their own cellSize, so the width rule is enforced here rather than trusted
         float minCellSize = minCorridorWidth + wallThickness;
@@ -175,25 +211,74 @@ public class MazeGenerator : MonoBehaviour
         UsedSeed = usedSeed;
         Debug.Log($"MazeGenerator: building a {width}x{height} maze with seed {usedSeed}.", this);
 
+        // A new attempt at the current floor. Must run before SpawnShards reads the per-floor cap.
+        PlayerWallet.BeginAttempt();
+        if (debugShards != 0) PlayerWallet.DebugDeposit(debugShards);
+
         Generate(usedSeed);
         CacheCellCenters();
         ChooseLockerCells(new System.Random(usedSeed + 3));
         BuildGeometry();
+        BuildPillars();
         BuildLockers();
 
-        // Bake before anything is placed inside the volume: the surface collects render meshes on every
-        // layer, so a star, a ceiling or a robot standing in the maze would be carved out of the navmesh.
-        // Lockers are built above, before this line, so their bodies are carved out too and the hunter
-        // paths around them instead of through them.
+        // +4 is the RNG offset props own (+0 carve, +1 stars, +2 lamps, +3 lockers, +5 shards). One
+        // instance is threaded through both prop passes below so the stream stays continuous across the
+        // navmesh bake between them - same seed and floor always puts props on the same walls.
+        System.Random propRng = new System.Random(usedSeed + 4);
+        BuildWallProps(propRng);
+
+        // Bake before anything else is placed inside the volume: the surface collects render meshes on
+        // every layer, so a star, a ceiling or a robot standing in the maze would be carved out of the
+        // navmesh. Lockers and wall props are built above, before this line, so their bodies are carved
+        // out too and the hunter paths around them instead of through them.
         BuildRuntimeNavMesh();
 
         BuildCeiling();
+        BuildCeilingProps(propRng);
         BuildWallLamps();
         DisableExistingPickups();
         SpawnStars(usedSeed);
+        SpawnShards(usedSeed);
         PlacePlayer();
         PlaceAI();
         SetUpAtmosphere();
+
+        if (staticBatchThemedGeometry && _theme != null) CombineStaticGroups();
+        // Whatever the artist sees in the gallery is exactly what was cloned, including unapplied
+        // overrides - so once cloning is done the gallery itself has no further reason to be visible.
+        // Also hidden when the fallback ran: an incomplete gallery must not leave five rows of point
+        // lights and locker triggers live in the scene during a run.
+        if (themeSet != null) themeSet.gameObject.SetActive(false);
+    }
+
+    /// <summary>
+    /// Picks the FloorThemes gallery row this maze clones, or leaves _theme null to fall back to the
+    /// primitive geometry the game shipped with before theming existed. The Editor cannot run the
+    /// LIGHTS OUT &gt; Build Floor Themes menu item on this implementer's behalf (it does not hold the
+    /// project lock), so until the user runs it and saves the scene, every maze uses this fallback.
+    /// </summary>
+    private void ResolveTheme()
+    {
+        _theme = null;
+        if (_profile == null) return; // Inspector mode (useFloorProfile off): primitives, as before
+
+        if (themeSet == null) themeSet = FindAnyObjectByType<FloorThemeSet>(FindObjectsInactive.Include);
+        if (themeSet == null)
+        {
+            Debug.LogError("MazeGenerator: no FloorThemes gallery in the scene, building the plain maze. Run LIGHTS OUT > Build Floor Themes in the Editor, then save the scene.", this);
+            return;
+        }
+
+        FloorTheme theme = themeSet.ForFloor(_profile.ThemeIndex);
+        if (theme == null || !theme.IsComplete)
+        {
+            Debug.LogError($"MazeGenerator: FloorThemes has no complete theme for floor {_profile.ThemeIndex}, building the plain maze.", themeSet);
+            return;
+        }
+
+        _theme = theme;
+        Debug.Log($"MazeGenerator: theme '{theme.DisplayName}'.", this);
     }
 
     /// <summary>
@@ -201,15 +286,19 @@ public class MazeGenerator : MonoBehaviour
     /// hunter, light and timers are handed their values later, where each is wired up. Runs first in
     /// Awake, before anything reads width, height, starCount, lockerCount or the lamp settings.
     /// </summary>
-    private void ApplyFloorProfile()
+    private void ApplyFloorProfile(bool freshStart)
     {
         _profile = null;
         if (!useFloorProfile) return;
 
-        // A debug floor is written back so the HUD, end screens and Next Floor all agree with it
-        if (debugFloor > 0) GameFlow.CurrentFloor = Mathf.Clamp(debugFloor, 1, FloorProfile.FinalFloor);
+        // A debug floor picks the floor a fresh start begins on, and is written back so the HUD, end
+        // screens and Next Floor all agree with it. Only on a fresh start: a reload that came from the
+        // shop door or a retry (SkipMenuOnLoad) must keep the floor the game set, or the shop's door
+        // would lead straight back to the same floor forever.
+        if (debugFloor > 0 && freshStart) GameFlow.CurrentFloor = Mathf.Clamp(debugFloor, 1, FloorProfile.FinalFloor);
 
         _profile = FloorProfile.For(GameFlow.CurrentFloor);
+        PlayerInventory.ApplyActiveModifiers(_profile);
 
         width = _profile.Width;
         height = _profile.Height;
@@ -219,7 +308,10 @@ public class MazeGenerator : MonoBehaviour
         lampIntensity = _profile.LampIntensity;
         lampRange = _profile.LampRange;
 
-        Debug.Log($"MazeGenerator: {_profile}", this);
+        string modifiers = PlayerInventory.ActiveModifiers.Count > 0
+            ? string.Join(", ", PlayerInventory.ActiveModifiers)
+            : "none";
+        Debug.Log($"MazeGenerator: {_profile}, modifiers: {modifiers}", this);
     }
 
     private void OnDestroy()
@@ -537,6 +629,48 @@ public class MazeGenerator : MonoBehaviour
 
     private void BuildLocker(Vector2Int cell)
     {
+        if (_theme != null && _theme.Locker != null)
+        {
+            BuildThemedLocker(cell);
+        }
+        else
+        {
+            BuildPrimitiveLocker(cell);
+        }
+    }
+
+    /// <summary>
+    /// Clones the theme's locker prefab and hands MazeGenerator's own computed positions to Configure -
+    /// the prefab's own insideAnchor/frontAnchor win when the artist set them, otherwise the same offsets
+    /// the primitive locker uses are computed from its transform. The prefab's own trigger collider
+    /// replaces the runtime-added one BuildPrimitiveLocker builds by hand.
+    /// </summary>
+    private void BuildThemedLocker(Vector2Int cell)
+    {
+        int x = cell.x;
+        int z = cell.y;
+        Vector3 cellCenter = CellCenter(x, z);
+        Vector3 openDir = -_lockerWall[cell];
+        float backFaceDistance = cellSize * 0.5f - wallThickness * 0.5f;
+        Vector3 wallFace = cellCenter - openDir * backFaceDistance;
+
+        Locker locker = Instantiate(_theme.Locker, wallFace, Quaternion.LookRotation(openDir, Vector3.up), _lockersGroup);
+        locker.gameObject.SetActive(true);
+        locker.name = $"Locker_{x}_{z}";
+
+        Vector3 inside = locker.InsideAnchor != null
+            ? locker.InsideAnchor.position
+            : locker.transform.TransformPoint(new Vector3(0f, 0f, lockerDepth * 0.5f));
+        Vector3 front = locker.FrontAnchor != null
+            ? locker.FrontAnchor.position
+            : locker.transform.TransformPoint(new Vector3(0f, 0f, lockerDepth + 1.0f));
+
+        locker.Configure(inside, front, locker.transform.eulerAngles.y, locker.Door);
+        _lockers.Add(locker);
+    }
+
+    private void BuildPrimitiveLocker(Vector2Int cell)
+    {
         int x = cell.x;
         int z = cell.y;
         Vector3 cellCenter = CellCenter(x, z);
@@ -546,7 +680,7 @@ public class MazeGenerator : MonoBehaviour
         Vector3 openDir = -_lockerWall[cell];
 
         GameObject root = new GameObject($"Locker_{x}_{z}");
-        root.transform.SetParent(_mazeRoot, false);
+        root.transform.SetParent(_lockersGroup, false);
         root.transform.position = cellCenter;
         root.transform.rotation = Quaternion.LookRotation(openDir, Vector3.up);
 
@@ -615,6 +749,172 @@ public class MazeGenerator : MonoBehaviour
         if (material != null) slat.GetComponent<MeshRenderer>().sharedMaterial = material;
     }
 
+    // ---------------------------------------------------------------- pillars
+
+    /// <summary>
+    /// Themed only: one pillar at every grid vertex where the walls meeting it are not just a straight
+    /// wall passing through - i.e. corners, junctions, dead-end wall stubs, and the outer boundary's own
+    /// corners. A vertex with exactly two closed segments that are collinear (both the east-west pair or
+    /// both the north-south pair) is a straight run and is skipped to reduce clutter.
+    /// </summary>
+    private void BuildPillars()
+    {
+        if (_theme == null || _theme.Pillar == null) return;
+
+        for (int vx = 0; vx <= width; vx++)
+        {
+            for (int vz = 0; vz <= height; vz++)
+            {
+                if (!VertexNeedsPillar(vx, vz)) continue;
+
+                Vector3 position = new Vector3(origin.x + vx * cellSize, FloorTop, origin.z + vz * cellSize);
+                GameObject pillar = Instantiate(_theme.Pillar, position, Quaternion.identity, _pillarsGroup);
+                pillar.SetActive(true);
+                pillar.name = $"Pillar_{vx}_{vz}";
+                pillar.transform.localScale = new Vector3(1f, wallHeight / 4f, 1f);
+            }
+        }
+    }
+
+    private bool VertexNeedsPillar(int vx, int vz)
+    {
+        bool west = HorizontalWallClosed(vx - 1, vz);
+        bool east = HorizontalWallClosed(vx, vz);
+        bool south = VerticalWallClosed(vx, vz - 1);
+        bool north = VerticalWallClosed(vx, vz);
+
+        int closedCount = (west ? 1 : 0) + (east ? 1 : 0) + (south ? 1 : 0) + (north ? 1 : 0);
+        if (closedCount == 0) return false; // nothing meets here at all
+        if (closedCount != 2) return true;  // a corner, a T-junction or a dead-end stub
+
+        bool collinear = (west && east) || (south && north);
+        return !collinear; // two collinear segments is a straight wall passing through - skip it
+    }
+
+    /// <summary>Is the horizontal (east-west running) wall segment at grid row zBoundary, spanning cell column x to x+1, closed? Out-of-range x means no such segment.</summary>
+    private bool HorizontalWallClosed(int x, int zBoundary)
+    {
+        if (x < 0 || x >= width) return false;
+        if (zBoundary <= 0) return _wallS[x, 0];
+        if (zBoundary >= height) return _wallN[x, height - 1];
+        return _wallS[x, zBoundary]; // == _wallN[x, zBoundary - 1], kept in sync by the carving code
+    }
+
+    /// <summary>Is the vertical (north-south running) wall segment at grid column xBoundary, spanning cell row z to z+1, closed? Out-of-range z means no such segment.</summary>
+    private bool VerticalWallClosed(int xBoundary, int z)
+    {
+        if (z < 0 || z >= height) return false;
+        if (xBoundary <= 0) return _wallW[0, z];
+        if (xBoundary >= width) return _wallE[width - 1, z];
+        return _wallW[xBoundary, z]; // == _wallE[xBoundary - 1, z], kept in sync by the carving code
+    }
+
+    // ---------------------------------------------------------------- props
+
+    /// <summary>
+    /// Themed only, built before the navmesh bake so a prop's body collider carves the navmesh like a
+    /// locker does. One prop per eligible cell at most. Skips the start cell, the AI cell and every
+    /// locker cell (decision 6). Clears and repopulates _propWalls, which BuildCeilingProps and
+    /// SpawnShards both consult afterwards.
+    /// </summary>
+    private void BuildWallProps(System.Random rng)
+    {
+        _propWalls.Clear();
+        if (_theme == null || _theme.Props == null || _theme.Props.Length == 0) return;
+
+        Vector2Int aiCell = FarthestCell();
+        HashSet<Vector2Int> lockerCellSet = new HashSet<Vector2Int>(_lockerCells);
+        float backFaceDistance = cellSize * 0.5f - wallThickness * 0.5f;
+        List<Vector3> walls = new List<Vector3>(4);
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int z = 0; z < height; z++)
+            {
+                if (x == 0 && z == 0) continue;
+                if (x == aiCell.x && z == aiCell.y) continue;
+
+                Vector2Int cell = new Vector2Int(x, z);
+                if (lockerCellSet.Contains(cell)) continue;
+                if (rng.NextDouble() >= _theme.WallPropChance) continue;
+
+                walls.Clear();
+                if (_wallN[x, z]) walls.Add(Vector3.forward);
+                if (_wallE[x, z]) walls.Add(Vector3.right);
+                if (_wallS[x, z]) walls.Add(Vector3.back);
+                if (_wallW[x, z]) walls.Add(Vector3.left);
+                if (walls.Count == 0) continue;
+
+                Vector3 dir = walls[rng.Next(walls.Count)];
+                PropPiece prop = PickWeightedProp(_theme.Props, PropPiece.MountKind.Wall, rng);
+                if (prop == null) return; // no wall props in this theme, nothing more to try
+
+                Vector3 pos = CellCenter(x, z) + dir * backFaceDistance;
+                PropPiece clone = Instantiate(prop, pos, Quaternion.LookRotation(-dir), _propsGroup);
+                clone.gameObject.SetActive(true);
+                clone.name = $"Prop_{prop.name}_{x}_{z}";
+
+                if (!_propWalls.TryGetValue(cell, out List<Vector3> taken))
+                {
+                    taken = new List<Vector3>();
+                    _propWalls[cell] = taken;
+                }
+                taken.Add(dir);
+            }
+        }
+    }
+
+    /// <summary>Themed only, built after the navmesh bake. Never shares a cell with a wall prop (decision 6, "keeps clutter readable").</summary>
+    private void BuildCeilingProps(System.Random rng)
+    {
+        if (_theme == null || _theme.Props == null || _theme.Props.Length == 0) return;
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int z = 0; z < height; z++)
+            {
+                if (x == 0 && z == 0) continue;
+
+                Vector2Int cell = new Vector2Int(x, z);
+                if (_lockerCells.Contains(cell)) continue;
+                if (_propWalls.ContainsKey(cell)) continue;
+                if (rng.NextDouble() >= _theme.CeilingPropChance) continue;
+
+                PropPiece prop = PickWeightedProp(_theme.Props, PropPiece.MountKind.Ceiling, rng);
+                if (prop == null) return; // no ceiling props in this theme, nothing more to try
+
+                Vector3 pos = CellCenter(x, z) + Vector3.up * wallHeight;
+                Quaternion rotation = Quaternion.Euler(0f, rng.Next(4) * 90f, 0f);
+                PropPiece clone = Instantiate(prop, pos, rotation, _propsGroup);
+                clone.gameObject.SetActive(true);
+                clone.name = $"Prop_{prop.name}_{x}_{z}";
+            }
+        }
+    }
+
+    /// <summary>Weighted pick among a theme's props of one mount kind, honouring EnabledInMaze. Null if the theme has none of that kind (or none currently enabled).</summary>
+    private static PropPiece PickWeightedProp(PropPiece[] props, PropPiece.MountKind mount, System.Random rng)
+    {
+        float totalWeight = 0f;
+        foreach (PropPiece candidate in props)
+        {
+            if (candidate == null || candidate.Mount != mount || !candidate.EnabledInMaze) continue;
+            totalWeight += Mathf.Max(0.0001f, candidate.Weight);
+        }
+        if (totalWeight <= 0f) return null;
+
+        float roll = (float)(rng.NextDouble() * totalWeight);
+        float cumulative = 0f;
+        foreach (PropPiece candidate in props)
+        {
+            if (candidate == null || candidate.Mount != mount || !candidate.EnabledInMaze) continue;
+            cumulative += Mathf.Max(0.0001f, candidate.Weight);
+            if (roll <= cumulative) return candidate;
+        }
+
+        return null; // floating point edge case only
+    }
+
     // ---------------------------------------------------------------- wall lamps
 
     /// <summary>
@@ -650,7 +950,8 @@ public class MazeGenerator : MonoBehaviour
             cells.Add(others[i]);
         }
 
-        Material sharedMaterial = BuildLampMaterial();
+        // Unused by the themed path (each clone brings its own fixture material), so skip building it.
+        Material sharedMaterial = _theme == null ? BuildLampMaterial() : null;
         foreach (Vector2Int cell in cells)
         {
             BuildWallLamp(cell, lockerCellSet.Contains(cell), sharedMaterial, rng);
@@ -672,6 +973,24 @@ public class MazeGenerator : MonoBehaviour
         return material;
     }
 
+    /// <summary>Direction from the cell centre toward the wall the lamp mounts on. Shared by both build paths so the RNG stream (UsedSeed + 2) stays identical whether or not a theme is in play - the set of lamp cells and their walls is unchanged by theming.</summary>
+    private Vector3 ResolveLampWallDirection(Vector2Int cell, bool isLockerCell, System.Random rng)
+    {
+        if (isLockerCell)
+        {
+            // Above the locker: the same back wall the locker sits against.
+            return _lockerWall[cell];
+        }
+
+        List<Vector3> options = new List<Vector3>();
+        if (_wallN[cell.x, cell.y]) options.Add(Vector3.forward);
+        if (_wallE[cell.x, cell.y]) options.Add(Vector3.right);
+        if (_wallS[cell.x, cell.y]) options.Add(Vector3.back);
+        if (_wallW[cell.x, cell.y]) options.Add(Vector3.left);
+        if (options.Count == 0) return Vector3.zero; // every real cell has at least one wall
+        return options[rng.Next(options.Count)];
+    }
+
     private void BuildWallLamp(Vector2Int cell, bool isLockerCell, Material material, System.Random rng)
     {
         int x = cell.x;
@@ -679,33 +998,41 @@ public class MazeGenerator : MonoBehaviour
         Vector3 cellCenter = CellCenter(x, z);
         float backFaceDistance = cellSize * 0.5f - wallThickness * 0.5f;
 
-        // Direction from the cell centre toward the wall the lamp mounts on.
-        Vector3 wallDirection;
-
-        if (isLockerCell)
-        {
-            // Above the locker: the same back wall the locker sits against.
-            wallDirection = _lockerWall[cell];
-        }
-        else
-        {
-            List<Vector3> options = new List<Vector3>();
-            if (_wallN[x, z]) options.Add(Vector3.forward);
-            if (_wallE[x, z]) options.Add(Vector3.right);
-            if (_wallS[x, z]) options.Add(Vector3.back);
-            if (_wallW[x, z]) options.Add(Vector3.left);
-            if (options.Count == 0) return; // every real cell has at least one wall
-            wallDirection = options[rng.Next(options.Count)];
-        }
+        Vector3 wallDirection = ResolveLampWallDirection(cell, isLockerCell, rng);
+        if (wallDirection == Vector3.zero) return;
 
         Vector3 position = cellCenter + wallDirection * (backFaceDistance - 0.08f) + Vector3.up * lampHeight;
+        Quaternion rotation = Quaternion.LookRotation(-wallDirection, Vector3.up);
+
+        if (_theme != null && _theme.Lamp != null)
+        {
+            WallLamp themedLamp = Instantiate(_theme.Lamp, position, rotation, _lampsGroup);
+            themedLamp.gameObject.SetActive(true);
+            themedLamp.name = $"WallLamp_{x}_{z}";
+
+            // The artist owns the fixture's look; the profile still owns brightness/range (stealth
+            // exposure depends on them) and colour comes from the theme, not the Inspector default.
+            Light themedLight = themedLamp.LightOrChild;
+            if (themedLight != null)
+            {
+                themedLight.color = _theme.LampColor;
+                themedLight.range = lampRange;
+                themedLight.intensity = lampIntensity;
+                themedLight.shadows = LightShadows.None;
+            }
+
+            bool themedFaulty = rng.NextDouble() < _theme.FaultyLampChance;
+            themedLamp.Configure(lampIntensity, themedFaulty, rng.Next(1000), isLockerCell);
+            _lamps.Add(themedLamp);
+            return;
+        }
 
         GameObject fixture = GameObject.CreatePrimitive(PrimitiveType.Cube);
         fixture.name = "WallLamp";
         fixture.layer = 0;
-        fixture.transform.SetParent(_mazeRoot, false);
+        fixture.transform.SetParent(_lampsGroup, false);
         fixture.transform.position = position;
-        fixture.transform.rotation = Quaternion.LookRotation(-wallDirection, Vector3.up);
+        fixture.transform.rotation = rotation;
         fixture.transform.localScale = new Vector3(0.28f, 0.10f, 0.14f);
 
         Collider fixtureCollider = fixture.GetComponent<Collider>();
@@ -727,7 +1054,7 @@ public class MazeGenerator : MonoBehaviour
 
         WallLamp lamp = fixture.AddComponent<WallLamp>();
         bool faulty = rng.NextDouble() < faultyLampChance;
-        lamp.Configure(light, fixtureRenderer, lampIntensity, faulty, rng.Next(1000));
+        lamp.Configure(light, fixtureRenderer, lampIntensity, faulty, rng.Next(1000), isLockerCell);
         _lamps.Add(lamp);
     }
 
@@ -760,10 +1087,102 @@ public class MazeGenerator : MonoBehaviour
         _mazeRoot = new GameObject("Maze").transform;
         _mazeRoot.position = origin;
 
+        _wallsGroup = Group("Walls");
+        _pillarsGroup = Group("Pillars");
+        _floorGroup = Group("Floor");
+        _ceilingGroup = Group("Ceiling");
+        _lampsGroup = Group("Lamps");
+        _lockersGroup = Group("Lockers");
+        _propsGroup = Group("Props");
+
+        // Always built, even when themed: cheap, and it is what PhantomDirector's silhouette falls back
+        // to if the theme itself has no wall material assigned.
         _wallMat = DarkCopy(wallMaterial, wallTint, "Maze_Wall");
         _floorMat = DarkCopy(floorMaterial, floorTint, "Maze_Floor");
         _ceilingMat = DarkCopy(wallMaterial, ceilingTint, "Maze_Ceiling");
 
+        if (_theme != null)
+        {
+            BuildThemedGeometry();
+        }
+        else
+        {
+            BuildPrimitiveGeometry();
+        }
+    }
+
+    private Transform Group(string groupName)
+    {
+        Transform group = new GameObject(groupName).transform;
+        group.SetParent(_mazeRoot, false);
+        return group;
+    }
+
+    /// <summary>One floor tile and one wall piece clone per cell, from the theme's prefabs.</summary>
+    private void BuildThemedGeometry()
+    {
+        for (int x = 0; x < width; x++)
+        {
+            for (int z = 0; z < height; z++)
+            {
+                GameObject tile = Instantiate(_theme.FloorTile, CellCenter(x, z), Quaternion.identity, _floorGroup);
+                tile.SetActive(true);
+                tile.name = $"Floor_{x}_{z}";
+                tile.transform.localScale = new Vector3(cellSize / 4.5f, 1f, cellSize / 4.5f);
+            }
+        }
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int z = 0; z < height; z++)
+            {
+                // Walls are shared, so only the west and south sides are built per cell; the outer
+                // east and north sides are added once on the last column / row.
+                if (_wallW[x, z])
+                {
+                    SpawnThemedWall(
+                        $"Wall_W_{x}_{z}",
+                        new Vector3(origin.x + x * cellSize, FloorTop, origin.z + (z + 0.5f) * cellSize),
+                        Quaternion.Euler(0f, 90f, 0f));
+                }
+
+                if (_wallS[x, z])
+                {
+                    SpawnThemedWall(
+                        $"Wall_S_{x}_{z}",
+                        new Vector3(origin.x + (x + 0.5f) * cellSize, FloorTop, origin.z + z * cellSize),
+                        Quaternion.identity);
+                }
+
+                if (x == width - 1 && _wallE[x, z])
+                {
+                    SpawnThemedWall(
+                        $"Wall_E_{x}_{z}",
+                        new Vector3(origin.x + (x + 1) * cellSize, FloorTop, origin.z + (z + 0.5f) * cellSize),
+                        Quaternion.Euler(0f, 90f, 0f));
+                }
+
+                if (z == height - 1 && _wallN[x, z])
+                {
+                    SpawnThemedWall(
+                        $"Wall_N_{x}_{z}",
+                        new Vector3(origin.x + (x + 0.5f) * cellSize, FloorTop, origin.z + (z + 1) * cellSize),
+                        Quaternion.identity);
+                }
+            }
+        }
+    }
+
+    private void SpawnThemedWall(string wallName, Vector3 floorCenter, Quaternion rotation)
+    {
+        WallPiece wall = Instantiate(_theme.Wall, floorCenter, rotation, _wallsGroup);
+        wall.gameObject.SetActive(true);
+        wall.name = wallName;
+        wall.transform.localScale = wall.ScaleFor(cellSize + wallThickness, wallHeight, wallThickness);
+    }
+
+    private void BuildPrimitiveGeometry()
+    {
         float spanX = width * cellSize + wallThickness;
         float spanZ = height * cellSize + wallThickness;
 
@@ -772,7 +1191,8 @@ public class MazeGenerator : MonoBehaviour
             "Floor",
             new Vector3(origin.x + width * cellSize * 0.5f, FloorTop - 0.1f, origin.z + height * cellSize * 0.5f),
             new Vector3(spanX, 0.2f, spanZ),
-            _floorMat);
+            _floorMat,
+            _floorGroup);
 
         float wallCenterY = FloorTop + wallHeight * 0.5f;
 
@@ -788,7 +1208,8 @@ public class MazeGenerator : MonoBehaviour
                         $"Wall_W_{x}_{z}",
                         new Vector3(origin.x + x * cellSize, wallCenterY, origin.z + (z + 0.5f) * cellSize),
                         new Vector3(wallThickness, wallHeight, cellSize + wallThickness),
-                        _wallMat);
+                        _wallMat,
+                        _wallsGroup);
                 }
 
                 if (_wallS[x, z])
@@ -797,7 +1218,8 @@ public class MazeGenerator : MonoBehaviour
                         $"Wall_S_{x}_{z}",
                         new Vector3(origin.x + (x + 0.5f) * cellSize, wallCenterY, origin.z + z * cellSize),
                         new Vector3(cellSize + wallThickness, wallHeight, wallThickness),
-                        _wallMat);
+                        _wallMat,
+                        _wallsGroup);
                 }
 
                 if (x == width - 1 && _wallE[x, z])
@@ -806,7 +1228,8 @@ public class MazeGenerator : MonoBehaviour
                         $"Wall_E_{x}_{z}",
                         new Vector3(origin.x + (x + 1) * cellSize, wallCenterY, origin.z + (z + 0.5f) * cellSize),
                         new Vector3(wallThickness, wallHeight, cellSize + wallThickness),
-                        _wallMat);
+                        _wallMat,
+                        _wallsGroup);
                 }
 
                 if (z == height - 1 && _wallN[x, z])
@@ -815,7 +1238,8 @@ public class MazeGenerator : MonoBehaviour
                         $"Wall_N_{x}_{z}",
                         new Vector3(origin.x + (x + 0.5f) * cellSize, wallCenterY, origin.z + (z + 1) * cellSize),
                         new Vector3(cellSize + wallThickness, wallHeight, wallThickness),
-                        _wallMat);
+                        _wallMat,
+                        _wallsGroup);
                 }
             }
         }
@@ -823,11 +1247,28 @@ public class MazeGenerator : MonoBehaviour
 
     /// <summary>
     /// Built after the navmesh bake, so there is never a question of whether the slab reads as a
-    /// walkable surface. A scaled cube rather than a quad or plane: it has a real underside.
+    /// walkable surface. Themed: one ceiling tile clone per cell. Primitive: a single scaled cube
+    /// (rather than a quad or plane, so it has a real underside).
     /// </summary>
     private void BuildCeiling()
     {
         if (!buildCeiling) return;
+
+        if (_theme != null)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                for (int z = 0; z < height; z++)
+                {
+                    Vector3 position = CellCenter(x, z) + Vector3.up * wallHeight;
+                    GameObject tile = Instantiate(_theme.CeilingTile, position, Quaternion.identity, _ceilingGroup);
+                    tile.SetActive(true);
+                    tile.name = $"Ceiling_{x}_{z}";
+                    tile.transform.localScale = new Vector3(cellSize / 4.5f, 1f, cellSize / 4.5f);
+                }
+            }
+            return;
+        }
 
         CreateBox(
             "Ceiling",
@@ -836,16 +1277,17 @@ public class MazeGenerator : MonoBehaviour
                 FloorTop + wallHeight + 0.1f,
                 origin.z + height * cellSize * 0.5f),
             new Vector3(width * cellSize + wallThickness, 0.2f, height * cellSize + wallThickness),
-            _ceilingMat);
+            _ceilingMat,
+            _ceilingGroup);
     }
 
-    private void CreateBox(string boxName, Vector3 center, Vector3 size, Material material)
+    private void CreateBox(string boxName, Vector3 center, Vector3 size, Material material, Transform parent)
     {
         GameObject box = GameObject.CreatePrimitive(PrimitiveType.Cube);
         box.name = boxName;
         // Layer 0 is what the player's GroundLayers mask and the camera's obstacle filter look at.
         box.layer = 0;
-        box.transform.SetParent(_mazeRoot, false);
+        box.transform.SetParent(parent, false);
         box.transform.position = center;
         box.transform.localScale = size;
 
@@ -854,6 +1296,15 @@ public class MazeGenerator : MonoBehaviour
             // sharedMaterial: one instance for the whole maze instead of one per cube
             box.GetComponent<MeshRenderer>().sharedMaterial = material;
         }
+    }
+
+    /// <summary>Combines the static themed geometry groups after the bake and after the ceiling exists. Off by default (staticBatchThemedGeometry); never run on lamps, lockers or props.</summary>
+    private void CombineStaticGroups()
+    {
+        if (_wallsGroup != null) StaticBatchingUtility.Combine(_wallsGroup.gameObject);
+        if (_pillarsGroup != null) StaticBatchingUtility.Combine(_pillarsGroup.gameObject);
+        if (_floorGroup != null) StaticBatchingUtility.Combine(_floorGroup.gameObject);
+        if (_ceilingGroup != null) StaticBatchingUtility.Combine(_ceilingGroup.gameObject);
     }
 
     // ---------------------------------------------------------------- navmesh
@@ -965,10 +1416,203 @@ public class MazeGenerator : MonoBehaviour
             if (starLights) AttachStarLight(star);
         }
 
+        _starCells.Clear();
+        _starCells.AddRange(chosen);
+
         if (chosen.Count < starCount)
         {
             Debug.LogWarning($"MazeGenerator: only {chosen.Count} of {starCount} stars fit in the maze.", this);
         }
+    }
+
+    /// <summary>
+    /// Glowing shards hidden off the direct path (F31). Anti-farm rule (decision 4a): a retried floor
+    /// spawns only ShardCount minus however many were already taken on this floor this campaign, so a
+    /// retry after a partial sweep has fewer lying about instead of a free refill.
+    /// </summary>
+    private void SpawnShards(int usedSeed)
+    {
+        int wanted = _profile != null ? _profile.ShardCount : shardCount;
+        wanted -= PlayerWallet.MazeShardsAlreadyTakenOnFloor(GameFlow.CurrentFloor);
+        if (wanted <= 0) return;
+
+        Vector2Int aiCell = FarthestCell();
+        HashSet<Vector2Int> lockerCellSet = new HashSet<Vector2Int>(_lockerCells);
+        HashSet<Vector2Int> starCellSet = new HashSet<Vector2Int>(_starCells);
+
+        // Preferred: nooks (two or more real walls). Fallback: anything else off the direct path.
+        List<Vector2Int> preferred = new List<Vector2Int>();
+        List<Vector2Int> fallback = new List<Vector2Int>();
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int z = 0; z < height; z++)
+            {
+                Vector2Int cell = new Vector2Int(x, z);
+                if (x == 0 && z == 0) continue;
+                if (cell == aiCell) continue;
+                if (starCellSet.Contains(cell)) continue;
+                if (lockerCellSet.Contains(cell)) continue;
+                if (_distance[x, z] < 2) continue;
+
+                bool farFromStars = true;
+                foreach (Vector2Int starCell in _starCells)
+                {
+                    int manhattan = Mathf.Abs(cell.x - starCell.x) + Mathf.Abs(cell.y - starCell.y);
+                    if (manhattan < 2) { farFromStars = false; break; }
+                }
+                if (!farFromStars) continue;
+
+                if (WallCount(x, z) >= 2) preferred.Add(cell);
+                else fallback.Add(cell);
+            }
+        }
+
+        System.Random rng = new System.Random(usedSeed + 5);
+        Shuffle(preferred, rng);
+        Shuffle(fallback, rng);
+        List<Vector2Int> pool = new List<Vector2Int>(preferred);
+        pool.AddRange(fallback);
+
+        int minSeparation = Mathf.Max(2, (width + height) / 5);
+        List<Vector2Int> chosen = new List<Vector2Int>();
+
+        for (int pass = 0; pass < 2 && chosen.Count < wanted; pass++)
+        {
+            foreach (Vector2Int candidate in pool)
+            {
+                if (chosen.Count >= wanted) break;
+                if (chosen.Contains(candidate)) continue;
+                if (pass == 0 && !IsFarEnough(candidate, chosen, minSeparation)) continue;
+                chosen.Add(candidate);
+            }
+        }
+
+        if (chosen.Count == 0) return;
+
+        Material shardMaterial = BuildShardMaterial();
+        AudioClip chime = BuildShardChimeClip();
+
+        foreach (Vector2Int cell in chosen)
+        {
+            BuildShard(cell, rng, shardMaterial, chime);
+        }
+    }
+
+    private Material BuildShardMaterial()
+    {
+        Material source = FindStarMaterial();
+        if (source == null) return null;
+
+        Material material = new Material(source) { name = "Maze_Shard" };
+        material.EnableKeyword("_EMISSION");
+        Color baseColor = new Color(0.55f, 0.9f, 1f);
+        if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", baseColor);
+        if (material.HasProperty("_Color")) material.SetColor("_Color", baseColor);
+        material.SetColor("_EmissionColor", baseColor * 2.5f);
+
+        _runtimeMaterials.Add(material);
+        return material;
+    }
+
+    /// <summary>
+    /// A shard root sits unscaled at the wall (so its SphereCollider radius means what it says); the
+    /// glassy cube it is built from is a scaled child instead of the root itself.
+    /// </summary>
+    private void BuildShard(Vector2Int cell, System.Random rng, Material material, AudioClip chime)
+    {
+        int x = cell.x;
+        int z = cell.y;
+        Vector3 cellCenter = CellCenter(x, z);
+        float backFaceDistance = cellSize * 0.5f - wallThickness * 0.5f;
+
+        List<Vector3> options = new List<Vector3>();
+        if (_wallN[x, z]) options.Add(Vector3.forward);
+        if (_wallE[x, z]) options.Add(Vector3.right);
+        if (_wallS[x, z]) options.Add(Vector3.back);
+        if (_wallW[x, z]) options.Add(Vector3.left);
+        if (options.Count == 0) return; // every real cell has at least one wall
+
+        // Avoid a wall already dressed with a prop (a shard clipping a prop is ugly); if that would
+        // empty the list, a shard on the same wall as a prop is harmless, so fall back to the full list.
+        if (_propWalls.TryGetValue(cell, out List<Vector3> takenWalls) && takenWalls.Count > 0)
+        {
+            List<Vector3> avoiding = new List<Vector3>(options.Count);
+            foreach (Vector3 dir in options)
+            {
+                if (!takenWalls.Contains(dir)) avoiding.Add(dir);
+            }
+            if (avoiding.Count > 0) options = avoiding;
+        }
+
+        Vector3 wallDirection = options[rng.Next(options.Count)];
+
+        Vector3 position = cellCenter + wallDirection * (backFaceDistance * 0.55f) + Vector3.up * 0.85f;
+
+        GameObject root = new GameObject($"Shard_{x}_{z}");
+        root.transform.SetParent(_mazeRoot, false);
+        root.transform.position = position;
+
+        GameObject body = GameObject.CreatePrimitive(PrimitiveType.Cube);
+        body.name = "Body";
+        body.layer = 0;
+        body.transform.SetParent(root.transform, false);
+        body.transform.localRotation = Quaternion.Euler(35f, rng.Next(360), 25f);
+        body.transform.localScale = new Vector3(0.16f, 0.5f, 0.16f);
+
+        Collider bodyCollider = body.GetComponent<Collider>();
+        if (bodyCollider != null) Destroy(bodyCollider);
+        if (material != null) body.GetComponent<MeshRenderer>().sharedMaterial = material;
+
+        SphereCollider trigger = root.AddComponent<SphereCollider>();
+        trigger.isTrigger = true;
+        trigger.radius = 0.7f;
+
+        GameObject lightHolder = new GameObject("Light");
+        lightHolder.transform.SetParent(root.transform, false);
+
+        Light light = lightHolder.AddComponent<Light>();
+        light.type = LightType.Point;
+        light.color = new Color(0.6f, 0.9f, 1f);
+        light.range = 2.5f;
+        light.intensity = 0.7f;
+        light.shadows = LightShadows.None;
+
+        ShardPickup shard = root.AddComponent<ShardPickup>();
+        shard.Configure(chime, (float)rng.NextDouble() * 10f);
+    }
+
+    /// <summary>Two-partial glass chime, same construction technique as MazeEscape.BuildPingClip.</summary>
+    private static AudioClip BuildShardChimeClip()
+    {
+        const int sampleRate = 44100;
+        const float duration = 0.22f;
+        const float decay = 0.07f;
+
+        int sampleCount = Mathf.CeilToInt(sampleRate * duration);
+        float[] samples = new float[sampleCount];
+
+        for (int i = 0; i < sampleCount; i++)
+        {
+            float t = i / (float)sampleRate;
+            float envelope = Mathf.Exp(-t / decay);
+            envelope *= Mathf.Clamp01(t / 0.003f); // 3 ms fade-in kills the attack click
+
+            float value = 0.6f * Mathf.Sin(2f * Mathf.PI * 2100f * t) + 0.6f * Mathf.Sin(2f * Mathf.PI * 3150f * t);
+            samples[i] = value * envelope;
+        }
+
+        float peak = 0f;
+        for (int i = 0; i < sampleCount; i++) peak = Mathf.Max(peak, Mathf.Abs(samples[i]));
+        if (peak > 0.0001f)
+        {
+            float gain = 0.8f / peak;
+            for (int i = 0; i < sampleCount; i++) samples[i] *= gain;
+        }
+
+        AudioClip clip = AudioClip.Create("ShardChime", sampleCount, 1, sampleRate, false);
+        clip.SetData(samples, 0);
+        return clip;
     }
 
     private bool IsFarEnough(Vector2Int candidate, List<Vector2Int> chosen, int minSeparation)
@@ -1148,11 +1792,24 @@ public class MazeGenerator : MonoBehaviour
 
     private void SetUpAtmosphere()
     {
+        // Hoisted so the dread wiring below (added after `outcome` exists) can still reach it -
+        // it is only built at all when darkness is on.
+        HorrorAtmosphere atmosphere = null;
         if (darkness)
         {
-            HorrorAtmosphere atmosphere = FindAnyObjectByType<HorrorAtmosphere>();
+            atmosphere = FindAnyObjectByType<HorrorAtmosphere>();
             if (atmosphere == null) atmosphere = gameObject.AddComponent<HorrorAtmosphere>();
-            if (_profile != null) atmosphere.ApplyProfile(_profile.Ambient, _profile.FogDensity);
+            if (_profile != null)
+            {
+                if (_theme != null)
+                {
+                    atmosphere.ApplyProfile(_theme.Ambient, _profile.FogDensity * _theme.FogDensityScale, _theme.FogColor);
+                }
+                else
+                {
+                    atmosphere.ApplyProfile(_profile.Ambient, _profile.FogDensity);
+                }
+            }
         }
 
         HorrorAudioDirector director = FindAnyObjectByType<HorrorAudioDirector>();
@@ -1174,6 +1831,7 @@ public class MazeGenerator : MonoBehaviour
         PlayerHud hud = FindAnyObjectByType<PlayerHud>();
         if (hud == null) hud = gameObject.AddComponent<PlayerHud>();
         hud.Configure(flashlight, stamina);
+        tension.BindHud(hud);
 
         if (stealth != null) stealth.SetLamps(_lamps);
         if (_profile != null && stamina != null) stamina.SetSprintSeconds(_profile.SprintSeconds);
@@ -1187,6 +1845,39 @@ public class MazeGenerator : MonoBehaviour
         GameOutcome outcome = FindAnyObjectByType<GameOutcome>();
         if (outcome == null) outcome = gameObject.AddComponent<GameOutcome>();
 
+        // Tier 3: relocation, phantoms, F27's beats and the subtitles they all share. Both need
+        // `outcome` for IsEnding, which is why they are wired here rather than beside TensionDirector.
+        AIPresence presence = aiFollower != null ? aiFollower.GetComponent<AIPresence>() : null;
+        Camera camera = rig != null ? rig.PlayerCamera : null;
+
+        DreadDirector dread = FindAnyObjectByType<DreadDirector>();
+        if (dread == null) dread = gameObject.AddComponent<DreadDirector>();
+        dread.Configure(this, player, camera, aiFollower, presence, director, atmosphere, flashlight, stealth, hud, outcome, _profile);
+
+        PhantomDirector phantoms = FindAnyObjectByType<PhantomDirector>();
+        if (phantoms == null) phantoms = gameObject.AddComponent<PhantomDirector>();
+        Material phantomWallMat = _theme != null && _theme.WallMaterial != null ? _theme.WallMaterial : _wallMat;
+        phantoms.Configure(this, player, camera, aiFollower, director, flashlight, stealth, outcome, dread, phantomWallMat, FindStarMaterial(), FindPlayerFootsteps(), _profile);
+
+        // Tier 4: the room between floors. Unlike everything else here it is authored in the scene
+        // (LIGHTS OUT > Build Shop Room generates it once), so it can be inspected and edited in the
+        // Editor. Only its panel is runtime UI.
+        ShopMenu shopMenu = FindAnyObjectByType<ShopMenu>();
+        if (shopMenu == null) shopMenu = gameObject.AddComponent<ShopMenu>();
+        shopMenu.Configure(player, hud, flashlight);
+
+        ShopRoom shop = FindAnyObjectByType<ShopRoom>();
+        if (shop != null && !shop.IsComplete)
+        {
+            Debug.LogError("MazeGenerator: the ShopRoom in the scene has no Arrival Point or zones. Run LIGHTS OUT > Build Shop Room in the Editor.", shop);
+            shop = null;
+        }
+        else if (shop == null)
+        {
+            Debug.LogError("MazeGenerator: there is no ShopRoom in the scene, so clearing floors 1-4 will end the run as a win. Run LIGHTS OUT > Build Shop Room in the Editor, then save the scene.", this);
+        }
+        if (shop != null) shop.Configure(player, hud, shopMenu);
+
         MazeEscape escape = null;
         if (escapeSequence)
         {
@@ -1198,6 +1889,7 @@ public class MazeGenerator : MonoBehaviour
         }
 
         outcome.Configure(player, aiFollower, director, escape, flashlight, UsedSeed);
+        outcome.BindShop(shop, this, hud, stealth);
 
         MainMenu menu = null;
         if (mainMenu)
@@ -1217,10 +1909,50 @@ public class MazeGenerator : MonoBehaviour
         PauseMenu pause = FindAnyObjectByType<PauseMenu>();
         if (pause == null) pause = gameObject.AddComponent<PauseMenu>();
 
-        pause.Configure(player, flashlight, menu, outcome, UsedSeed);
+        pause.Configure(player, flashlight, menu, outcome, UsedSeed, shopMenu);
+
+        ConsumableController items = FindAnyObjectByType<ConsumableController>();
+        if (items == null) items = gameObject.AddComponent<ConsumableController>();
+        items.Configure(player, flashlight, stealth, this, hud, escape, outcome, menu, pause);
+
+        // Campaign cosmetics (F35), applied on every scene build so the choice survives a reload.
+        if (flashlight != null) flashlight.SetBeamColor(ShopCatalogue.TorchColours[PlayerInventory.TorchColourIndex].Colour);
+        if (hud != null) hud.SetTint(ShopCatalogue.HudTints[PlayerInventory.HudTintIndex].Colour);
+        tension.SetCalmColor(ShopCatalogue.HudTints[PlayerInventory.HudTintIndex].Colour);
+        if (_profile != null && stealth != null) stealth.NoiseScale = _profile.NoiseScale;
+
+        // Debug affordance: open the floor as if the hatch had just been reached.
+        if (debugStartInShop) StartCoroutine(DebugEnterShop(outcome));
+    }
+
+    private static IEnumerator DebugEnterShop(GameOutcome outcome)
+    {
+        yield return null;
+        outcome.FloorCleared();
     }
 
     // ---------------------------------------------------------------- helpers
+
+    /// <summary>Cell centre farthest (flat) from a point. F36 warps the released hunter here.</summary>
+    public Vector3 FarthestCellCenterFrom(Vector3 point)
+    {
+        Vector3 best = _cellCenters.Count > 0 ? _cellCenters[0] : point;
+        float bestDistance = -1f;
+
+        foreach (Vector3 cell in _cellCenters)
+        {
+            Vector3 flat = cell - point;
+            flat.y = 0f;
+            float distance = flat.sqrMagnitude;
+            if (distance > bestDistance)
+            {
+                bestDistance = distance;
+                best = cell;
+            }
+        }
+
+        return best;
+    }
 
     private Vector2Int FarthestCell()
     {

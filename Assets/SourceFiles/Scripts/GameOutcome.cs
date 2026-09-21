@@ -27,6 +27,9 @@ public class GameOutcome : MonoBehaviour
     // Seconds into the capture sequence at which the torch flips. Ends off.
     private static readonly float[] FlickerTimes = { 0.5f, 0.56f, 0.62f, 0.68f, 0.74f, 0.80f, 0.9f };
 
+    [Tooltip("How long the hunter stands stunned after Second Wind lets go (F36).")]
+    [SerializeField] private float secondWindStunSeconds = 6f;
+
     /// <summary>True once the run has ended. Static, so reset when the scene is torn down.</summary>
     public static bool IsOver { get; private set; }
 
@@ -39,6 +42,18 @@ public class GameOutcome : MonoBehaviour
     private MazeEscape _escape;
     private Flashlight _flashlight;
     private int _seed;
+
+    // F32/F37: the room between floors. May all stay null (escapeSequence off, or BindShop never called).
+    private ShopRoom _shop;
+    private MazeGenerator _maze;
+    private PlayerHud _hud;
+    private PlayerStealthState _stealth;
+    private bool _showingLedger;
+    private bool _continuePressed;
+
+    // Kept only so ShowEndScreen can report the number after the fact.
+    private Payout _floorPayout;
+    private Payout _consolationPayout;
 
     private int _collected;
     private int _total;
@@ -63,6 +78,15 @@ public class GameOutcome : MonoBehaviour
         if (_follower != null) _follower.PlayerCaught -= HandleCaught;
         _follower = follower;
         if (_follower != null) _follower.PlayerCaught += HandleCaught;
+    }
+
+    /// <summary>Wired after escape and outcome.Configure, once the shop and stealth references exist.</summary>
+    public void BindShop(ShopRoom shop, MazeGenerator maze, PlayerHud hud, PlayerStealthState stealth)
+    {
+        _shop = shop;
+        _maze = maze;
+        _hud = hud;
+        _stealth = stealth;
     }
 
     private void Awake()
@@ -90,7 +114,7 @@ public class GameOutcome : MonoBehaviour
     private void Update()
     {
         // Held every frame, for the same reason as the title screen: focus changes re-lock the cursor
-        if (IsOver) PlayerLock.SetCursorFree(true);
+        if (IsOver || _showingLedger) PlayerLock.SetCursorFree(true);
     }
 
     private void HandleProgress(int collected, int total)
@@ -101,10 +125,224 @@ public class GameOutcome : MonoBehaviour
 
     private void HandleCaught()
     {
+        if (IsOver || IsEnding) return;
+
+        // F36 Second Wind: a release, not an invulnerability. Consumed automatically, once.
+        if (PlayerInventory.Count(ShopItem.SecondWind) > 0 && _follower != null && _maze != null)
+        {
+            PlayerInventory.TryConsume(ShopItem.SecondWind);
+            StartCoroutine(SecondWindSequence());
+            return;
+        }
+
         Lose(LoseReason.Caught);
     }
 
+    private IEnumerator SecondWindSequence()
+    {
+        IsEnding = true; // pause, dread, phantoms, and Lose() all wait
+        if (_escape != null) _escape.Frozen = true; // not Stop(): Stop is permanent
+        bool torchWasOn = _flashlight != null && _flashlight.IsOn;
+
+        PlayerLock.Freeze(_player, true);
+        if (_flashlight != null) _flashlight.InputEnabled = false;
+        if (_audio != null) _audio.PlayCaptureSting();
+
+        Canvas canvas = RuntimeUi.ResolveCanvas();
+        Image blackout = canvas != null
+            ? RuntimeUi.CreatePanel(canvas.transform, "Blackout", new Color(0f, 0f, 0f, 0f)).GetComponent<Image>()
+            : null;
+        if (blackout != null) blackout.transform.SetAsLastSibling();
+
+        // A hard cut, not the slow capture fade.
+        if (blackout != null) yield return Fade(blackout, 0f, 1f, 0.25f);
+        else yield return new WaitForSeconds(0.25f);
+
+        yield return new WaitForSeconds(0.7f);
+
+        // Let go: warp the hunter to the far side of the maze and stun it.
+        Vector3 far = _maze.FarthestCellCenterFrom(_player.position);
+        _follower.Release(far, secondWindStunSeconds);
+
+        // If it busted a locker, the player is still standing inside it with movement locked.
+        // Locker.Leave() clears MovementLocked directly, so re-assert the freeze straight after -
+        // the sequence is not done with the player yet.
+        if (_maze != null)
+        {
+            foreach (Locker locker in _maze.Lockers)
+            {
+                if (locker != null && locker.Occupied) locker.ForceLeave();
+            }
+            PlayerLock.Freeze(_player, true);
+        }
+
+        if (_stealth != null) _stealth.LastExposed = false;
+        if (_audio != null) _audio.ResumeBed();
+        if (_flashlight != null)
+        {
+            _flashlight.SetOn(torchWasOn);
+            _flashlight.Stutter(1.5f);
+        }
+
+        if (blackout != null)
+        {
+            yield return Fade(blackout, 1f, 0f, 0.6f);
+            Destroy(blackout.gameObject);
+        }
+        else
+        {
+            yield return new WaitForSeconds(0.6f);
+        }
+
+        if (_escape != null) _escape.Frozen = false;
+        PlayerLock.Freeze(_player, false);
+        if (_flashlight != null) _flashlight.InputEnabled = true;
+        IsEnding = false;
+
+        if (_hud != null) _hud.ShowSubtitle("It let go. It will not do that twice.", 3.2f);
+    }
+
     // ---------------------------------------------------------------- endings
+
+    /// <summary>The hatch was reached. Below the final floor this is not an ending: black, teleport, ledger, shop.</summary>
+    public void FloorCleared()
+    {
+        if (IsOver || IsEnding) return;
+
+        if (GameFlow.CurrentFloor >= FloorProfile.FinalFloor || _shop == null)
+        {
+            Win();
+            return;
+        }
+
+        StartCoroutine(FloorClearSequence());
+    }
+
+    private IEnumerator FloorClearSequence()
+    {
+        IsEnding = true; // blocks pause, dread, phantoms, and a second ending
+        GameFlow.IsRunActive = false;
+        _runTime = Time.time - GameFlow.RunStartTime;
+        float secondsLeft = _escape != null ? _escape.TimeLeft : 0f;
+
+        EndTheHunt();
+        if (_flashlight != null) { _flashlight.SetOn(false); _flashlight.InputEnabled = false; }
+        PlayerLock.Freeze(_player, true);
+
+        Canvas canvas = RuntimeUi.ResolveCanvas();
+        Image blackout = null;
+        if (canvas != null)
+        {
+            blackout = RuntimeUi.CreatePanel(canvas.transform, "Blackout", new Color(0f, 0f, 0f, 0f)).GetComponent<Image>();
+            blackout.transform.SetAsLastSibling();
+        }
+
+        if (blackout != null) yield return Fade(blackout, 0f, 1f, 0.6f);
+        else yield return new WaitForSeconds(0.6f); // the player is falling onto the platform meanwhile
+
+        _shop.ArrivePlayer(_player);
+
+        Payout payout = PlayerWallet.ComputeFloorClear(GameFlow.CurrentFloor, _collected, secondsLeft);
+        PlayerWallet.Deposit(payout);
+
+        Transform ledger = blackout != null ? BuildLedger(blackout.transform, payout) : null;
+        _showingLedger = true; // Update frees the cursor while this is true
+        PlayerLock.SetCursorFree(true);
+
+        _continuePressed = false;
+        yield return new WaitUntil(() => _continuePressed);
+        _showingLedger = false;
+
+        GameFlow.IsInShop = true;
+        IsEnding = false;
+        _shop.Open();
+        PlayerLock.Freeze(_player, false);
+        PlayerLock.SetCursorFree(false);
+
+        if (blackout != null)
+        {
+            yield return Fade(blackout, 1f, 0f, 0.5f, ledger);
+            Destroy(blackout.gameObject);
+        }
+    }
+
+    /// <summary>The floor-clear ledger, built onto the blackout panel. CONTINUE sets _continuePressed.</summary>
+    private Transform BuildLedger(Transform parent, Payout payout)
+    {
+        // No prior pause/menu may have built one yet (mainMenu = false skips the title screen's call).
+        RuntimeUi.EnsureEventSystem();
+
+        GameObject ledger = RuntimeUi.CreatePanel(parent, "Ledger", Color.clear);
+        Transform root = ledger.transform;
+
+        TextMeshProUGUI title = RuntimeUi.CreateText(root, "Title", payout.Title, 84f, Green);
+        title.fontStyle = FontStyles.Bold;
+        RuntimeUi.Place(title.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -200f), new Vector2(1600f, 120f));
+
+        TextMeshProUGUI subtitle = RuntimeUi.CreateText(root, "Subtitle",
+            "The hatch closed behind you. Something down here is open.", 34f, Grey);
+        RuntimeUi.Place(subtitle.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -280f), new Vector2(1400f, 50f));
+
+        float y = -370f;
+        foreach (PayoutLine line in payout.Lines)
+        {
+            bool informational = line.Amount == 0 && line.Label.StartsWith("SHARDS FOUND");
+            Color lineColor = informational ? new Color(Grey.r, Grey.g, Grey.b, 0.6f) : Grey;
+
+            TextMeshProUGUI label = RuntimeUi.CreateText(root, "Label", line.Label, 36f, lineColor);
+            label.alignment = TextAlignmentOptions.Left;
+            RuntimeUi.Place(label.rectTransform, new Vector2(0.5f, 1f), new Vector2(-100f, y), new Vector2(900f, 50f));
+
+            string amountText = informational ? "already yours" : $"+{line.Amount}";
+            TextMeshProUGUI amount = RuntimeUi.CreateText(root, "Amount", amountText, 36f, lineColor);
+            amount.alignment = TextAlignmentOptions.Right;
+            RuntimeUi.Place(amount.rectTransform, new Vector2(0.5f, 1f), new Vector2(420f, y), new Vector2(300f, 50f));
+
+            y -= 58f;
+        }
+
+        GameObject rule = RuntimeUi.CreatePanel(root, "Rule", new Color(Grey.r, Grey.g, Grey.b, 0.4f));
+        RuntimeUi.Place(rule.GetComponent<Image>().rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, y - 6f), new Vector2(900f, 2f));
+        y -= 50f;
+
+        TextMeshProUGUI payoutText = RuntimeUi.CreateText(root, "Payout", $"PAYOUT  +{payout.Total}", 44f, Green);
+        RuntimeUi.Place(payoutText.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, y), new Vector2(900f, 60f));
+        y -= 60f;
+
+        Color shardColor = new Color(0.7f, 0.9f, 1f);
+        TextMeshProUGUI wallet = RuntimeUi.CreateText(root, "Wallet", $"{PlayerWallet.CurrencyName}  {PlayerWallet.Shards}", 44f, shardColor);
+        RuntimeUi.Place(wallet.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, y), new Vector2(900f, 60f));
+
+        Button continueButton = RuntimeUi.CreateButton(root, "CONTINUE", new Vector2(0f, 160f), new Vector2(560f, 86f), 42f,
+            new Color(0.08f, 0.32f, 0.24f, 0.95f), new Color(0.15f, 0.55f, 0.42f, 1f), Color.white);
+        continueButton.onClick.AddListener(() => _continuePressed = true);
+
+        return root;
+    }
+
+    /// <summary>Fades a full-screen Image between two alpha values. If alsoFade is given, its CanvasGroup fades out alongside it.</summary>
+    private static IEnumerator Fade(Image image, float from, float to, float seconds, Transform alsoFade = null)
+    {
+        CanvasGroup group = null;
+        if (alsoFade != null)
+        {
+            group = alsoFade.GetComponent<CanvasGroup>();
+            if (group == null) group = alsoFade.gameObject.AddComponent<CanvasGroup>();
+        }
+
+        float t = 0f;
+        while (t < seconds)
+        {
+            t += Time.deltaTime;
+            float k = Mathf.Clamp01(t / seconds);
+            if (image != null) image.color = new Color(0f, 0f, 0f, Mathf.Lerp(from, to, k));
+            if (group != null) group.alpha = 1f - k;
+            yield return null;
+        }
+
+        if (image != null) image.color = new Color(0f, 0f, 0f, to);
+        if (group != null) group.alpha = 0f;
+    }
 
     public void Win()
     {
@@ -113,6 +351,10 @@ public class GameOutcome : MonoBehaviour
         IsOver = true;
         GameFlow.IsRunActive = false;
         _runTime = Time.time - GameFlow.RunStartTime;
+
+        float secondsLeft = _escape != null ? _escape.TimeLeft : 0f;
+        _floorPayout = PlayerWallet.ComputeFloorClear(GameFlow.CurrentFloor, _collected, secondsLeft);
+        PlayerWallet.Deposit(_floorPayout);
 
         EndTheHunt();
         if (_escape != null) _escape.Stop();
@@ -135,6 +377,9 @@ public class GameOutcome : MonoBehaviour
         IsOver = true;
         GameFlow.IsRunActive = false;
         _runTime = Time.time - GameFlow.RunStartTime;
+
+        _consolationPayout = PlayerWallet.ComputeConsolation(GameFlow.CurrentFloor, _collected);
+        PlayerWallet.Deposit(_consolationPayout);
 
         EndTheHunt();
         if (_escape != null) _escape.Stop();
@@ -206,6 +451,9 @@ public class GameOutcome : MonoBehaviour
         EndTheHunt();
         IsOver = true;
         IsEnding = false;
+
+        _consolationPayout = PlayerWallet.ComputeConsolation(GameFlow.CurrentFloor, _collected);
+        PlayerWallet.Deposit(_consolationPayout);
 
         yield return new WaitForSeconds(0.2f);
 
@@ -300,6 +548,30 @@ public class GameOutcome : MonoBehaviour
         TextMeshProUGUI statsText = RuntimeUi.CreateText(root, "Stats", stats, 32f, Grey);
         statsText.characterSpacing = 4f;
         RuntimeUi.Place(statsText.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -380f), new Vector2(1600f, 50f));
+
+        // Second line: what this attempt paid into the campaign wallet.
+        bool isFinalWin = won && GameFlow.CurrentFloor >= FloorProfile.FinalFloor;
+        string stats2 = null;
+        Color shardColor = new Color(0.7f, 0.9f, 1f);
+        if (!won)
+        {
+            int amount = _consolationPayout != null ? _consolationPayout.Total : 0;
+            stats2 = amount > 0
+                ? $"CONSOLATION  +{amount}     {PlayerWallet.CurrencyName}  {PlayerWallet.Shards}"
+                : $"NO CONSOLATION     {PlayerWallet.CurrencyName}  {PlayerWallet.Shards}";
+        }
+        else if (isFinalWin)
+        {
+            int amount = _floorPayout != null ? _floorPayout.Total : 0;
+            stats2 = $"PAYOUT  +{amount}     CAMPAIGN TOTAL  {PlayerWallet.TotalEarned}";
+        }
+
+        if (stats2 != null)
+        {
+            TextMeshProUGUI stats2Text = RuntimeUi.CreateText(root, "Stats2", stats2, 32f, shardColor);
+            stats2Text.characterSpacing = 4f;
+            RuntimeUi.Place(stats2Text.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -430f), new Vector2(1600f, 50f));
+        }
 
         // Wider than the title screen's buttons: "TRY THIS MAZE AGAIN" does not fit in 420 at 40 pt
         Vector2 size = new Vector2(560f, 86f);

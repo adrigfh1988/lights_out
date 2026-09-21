@@ -51,6 +51,9 @@ public class AIFollower : MonoBehaviour
     [Header("Escalation")]
     [Tooltip("Speed before a single star has been taken. Low enough to read as barely moving at all.")]
     [SerializeField] private float dormantSpeed = 0.7f;
+    [Tooltip("Chance, at full progress, that a wander leg heads for the cell nearest the player instead of a star or a random cell. It reads as the thing knowing roughly where you are, without ever knowing exactly.")]
+    [Range(0f, 1f)]
+    [SerializeField] private float hunchBiasAtPeak = 0.35f;
 
     [Header("Hearing")]
     [Tooltip("Seconds between hearing checks")]
@@ -116,6 +119,8 @@ public class AIFollower : MonoBehaviour
     private bool _wasHidden;
 
     private State _state = State.Chase;
+    // F36 Second Wind: no movement, no perception until Time.time passes this. -1 = not stunned.
+    private float _stunnedUntil = -1f;
     private bool _hasSight;
     private float _sightTimer;
     private float _lostSightTimer;
@@ -153,6 +158,43 @@ public class AIFollower : MonoBehaviour
 
     /// <summary>Height of the eyes above the feet, for anything that wants to look at them.</summary>
     public float EyeHeight => eyeHeight;
+
+    /// <summary>True while actively chasing a seen (or hiding-spot-busted) player.</summary>
+    public bool IsChasing => _state == State.Chase;
+
+    /// <summary>True once the follower has caught the player.</summary>
+    public bool IsCaptured => _state == State.Captured;
+
+    /// <summary>True once the hatch is open and the endgame chase is on (mirrors SetThreatLevel's hunting flag).</summary>
+    public bool IsHunting => _hunting;
+
+    /// <summary>Flat (Y-ignoring) distance to the target, or float.MaxValue with no target.</summary>
+    public float FlatDistanceToTarget => target != null ? FlatDirection(target.position - transform.position).magnitude : float.MaxValue;
+
+    // ---------------------------------------------------------------- escalation (effective values)
+    //
+    // ApplyDifficulty writes the floor's ceiling straight into these fields, and SetThreatLevel is
+    // called on every ProgressChanged - so scaling the fields themselves would compound per star.
+    // Every use site instead reads one of these, which lerp from a gentler start up to the field's
+    // (unmodified) ceiling as _threat climbs from 0 to 1.
+
+    /// <summary>How long sight is forgiven after losing it. Lerps 50%..100% of the floor's value.</summary>
+    private float EffectiveLoseSightTime => Mathf.Lerp(loseSightTime * 0.5f, loseSightTime, _threat);
+
+    /// <summary>Hard cap on a single search sweep. Lerps 50%..100% of the floor's value.</summary>
+    private float EffectiveSearchBudget => Mathf.Lerp(searchBudget * 0.5f, searchBudget, _threat);
+
+    /// <summary>Chance of heading for a live star while wandering. Lerps 50%..100% of the floor's value.</summary>
+    private float EffectivePatrolBias => Mathf.Lerp(patrolBias * 0.5f, patrolBias, _threat);
+
+    /// <summary>How far a noise carries. Floor's hearing scale, further scaled 60%..100% by threat.</summary>
+    private float EffectiveHearingScale => _hearingScale * Mathf.Lerp(0.6f, 1f, _threat);
+
+    /// <summary>How many spots a search sweep checks. Lerps 50%..100% of the floor's value.</summary>
+    private int EffectiveSearchPoints => Mathf.RoundToInt(Mathf.Lerp(searchPoints * 0.5f, searchPoints, _threat));
+
+    /// <summary>Chance a wander leg heads for the cell nearest the player instead of a star or random cell. 0 at zero progress.</summary>
+    private float HunchBias => Mathf.Lerp(0f, hunchBiasAtPeak, _threat);
 
     /// <summary>Corridor positions the follower patrols when it cannot see the player.</summary>
     public void SetWanderPoints(IEnumerable<Vector3> points)
@@ -316,6 +358,14 @@ public class AIFollower : MonoBehaviour
             return;
         }
 
+        // F36 Second Wind: stands stunned - no movement, no perception - until the stun expires.
+        if (Time.time < _stunnedUntil)
+        {
+            _agent.isStopped = true;
+            UpdateAnimator();
+            return;
+        }
+
         if (_wanderPoints.Count == 0)
         {
             UpdateChaseOnly();
@@ -379,26 +429,53 @@ public class AIFollower : MonoBehaviour
         _hearingTimer = hearingInterval;
 
         // Early floors hear less: the same footsteps carry a shorter way
-        float noiseRadius = _stealth.NoiseRadius * _hearingScale;
+        float noiseRadius = _stealth.NoiseRadius;
         if (noiseRadius <= 0.01f) return;
-
-        // Straight-line distance is always <= path distance, so this is a correct cheap reject.
-        if (Vector3.Distance(transform.position, target.position) > noiseRadius) return;
-
-        // Path distance from here on: in a maze, sound should travel down corridors, or creeping
-        // around a corner buys the player nothing. Both ends are snapped to the mesh first, or
-        // CalculatePath just returns false whenever the player is a fraction off it.
-        if (!NavMesh.SamplePosition(transform.position, out NavMeshHit from, 2f, NavMesh.AllAreas)) return;
-        if (!NavMesh.SamplePosition(target.position, out NavMeshHit to, 2f, NavMesh.AllAreas)) return;
-        if (!NavMesh.CalculatePath(from.position, to.position, NavMesh.AllAreas, _hearingPath)) return;
-        if (_hearingPath.status != NavMeshPathStatus.PathComplete) return;
-        if (PathLength(_hearingPath) > noiseRadius) return;
+        if (!CanHear(target.position, noiseRadius * EffectiveHearingScale)) return;
 
         _lastKnownPosition = target.position;
         if (_state != State.Chase && _state != State.Captured)
         {
             EnterSearch();
         }
+    }
+
+    /// <summary>
+    /// Path-distance hearing test shared by the player's footsteps and one-off noises (a star being
+    /// taken). In a maze, sound should travel down corridors, or creeping around a corner buys the
+    /// player nothing. Both ends are snapped to the mesh first, or CalculatePath just returns false
+    /// whenever the point is a fraction off it.
+    /// </summary>
+    private bool CanHear(Vector3 at, float radius)
+    {
+        if (radius <= 0.01f) return false;
+
+        // Straight-line distance is always <= path distance, so this is a correct cheap reject.
+        if (Vector3.Distance(transform.position, at) > radius) return false;
+
+        if (!NavMesh.SamplePosition(transform.position, out NavMeshHit from, 2f, NavMesh.AllAreas)) return false;
+        if (!NavMesh.SamplePosition(at, out NavMeshHit to, 2f, NavMesh.AllAreas)) return false;
+        if (!NavMesh.CalculatePath(from.position, to.position, NavMesh.AllAreas, _hearingPath)) return false;
+        if (_hearingPath.status != NavMeshPathStatus.PathComplete) return false;
+        return PathLength(_hearingPath) <= radius;
+    }
+
+    /// <summary>
+    /// A one-off sound at a point (a star being taken). Same rules as footsteps: heard along corridors,
+    /// scaled by the floor's hearing, and it can only ever start a search - never a chase. Returns true
+    /// if it was heard, so the caller can say so (a subtitle).
+    /// </summary>
+    public bool HearNoise(Vector3 at, float radius)
+    {
+        if (_agent == null || !_agent.isOnNavMesh || _state == State.Captured) return false;
+        if (!CanHear(at, radius * EffectiveHearingScale)) return false;
+
+        _lastKnownPosition = at;
+        if (_state != State.Chase)
+        {
+            EnterSearch();
+        }
+        return true;
     }
 
     private static float PathLength(NavMeshPath path)
@@ -504,7 +581,7 @@ public class AIFollower : MonoBehaviour
         if (_hasSight)
         {
             _state = State.Chase;
-            _lostSightTimer = loseSightTime;
+            _lostSightTimer = EffectiveLoseSightTime;
             _lastKnownPosition = target.position;
         }
         else if (_state == State.Chase && !_bustingHidingSpot)
@@ -600,7 +677,7 @@ public class AIFollower : MonoBehaviour
     private void EnterSearch()
     {
         _state = State.Search;
-        _searchBudgetTimer = searchBudget;
+        _searchBudgetTimer = EffectiveSearchBudget;
         _searchDwellTimer = 0f;
         // A fresh noise can land mid-dwell, and the dwell is what set isStopped. Clearing it here is
         // what stops the follower standing frozen until the search budget runs out.
@@ -622,9 +699,10 @@ public class AIFollower : MonoBehaviour
             (_searchQueue[i], _searchQueue[j]) = (_searchQueue[j], _searchQueue[i]);
         }
 
-        if (_searchQueue.Count > searchPoints)
+        int effectiveSearchPoints = EffectiveSearchPoints;
+        if (_searchQueue.Count > effectiveSearchPoints)
         {
-            _searchQueue.RemoveRange(searchPoints, _searchQueue.Count - searchPoints);
+            _searchQueue.RemoveRange(effectiveSearchPoints, _searchQueue.Count - effectiveSearchPoints);
         }
 
         // Always check the exact spot first
@@ -720,10 +798,16 @@ public class AIFollower : MonoBehaviour
             return;
         }
 
-        // Mostly head for something still worth guarding, but not always: a hard preference would make
-        // it camp the stars, which is unfair rather than tense.
+        // Hunch first (escalates with threat, reads as "it knows roughly where you are"), then the
+        // patrol preference for a live star, then genuinely random. A hard preference on either would
+        // make it camp, which is unfair rather than tense.
         int next = -1;
-        if (_patrolTargets != null && Random.value < patrolBias)
+        if (Random.value < HunchBias)
+        {
+            next = NearestCellToTarget();
+        }
+
+        if (next < 0 && _patrolTargets != null && Random.value < EffectivePatrolBias)
         {
             next = NearestCellToLivePatrolTarget();
         }
@@ -826,6 +910,75 @@ public class AIFollower : MonoBehaviour
         }
 
         return nearestCell;
+    }
+
+    /// <summary>Index of the wander point closest to the player's actual position, or -1. Backs HunchBias only - it never grants sight or a live-tracked destination beyond this one wander leg.</summary>
+    private int NearestCellToTarget()
+    {
+        if (target == null) return -1;
+
+        int nearestCell = -1;
+        float nearestDistance = float.MaxValue;
+        for (int i = 0; i < _wanderPoints.Count; i++)
+        {
+            float distance = Vector3.Distance(_wanderPoints[i], target.position);
+            if (distance < nearestDistance)
+            {
+                nearestDistance = distance;
+                nearestCell = i;
+            }
+        }
+
+        return nearestCell;
+    }
+
+    /// <summary>
+    /// F23 relocation primitive: warp onto the maze near `position`, then search toward `towards` as
+    /// though it just heard something there. Refuses mid-chase or captured - a relocation mid-chase
+    /// would be a teleporting predator, which is the one thing this system must never read as.
+    /// </summary>
+    public bool RelocateTo(Vector3 position, Vector3 towards)
+    {
+        if (_agent == null || _state == State.Captured || _state == State.Chase) return false;
+        if (!NavMesh.SamplePosition(position, out NavMeshHit hit, 1.5f, NavMesh.AllAreas)) return false;
+        if (!_agent.Warp(hit.position)) return false;
+
+        // Re-evaluate perception next frame from the new spot rather than trusting a stale reading
+        // taken from wherever it used to be.
+        _hasSight = false;
+        _sightTimer = 0f;
+        _repathTimer = 0f;
+        _lastKnownPosition = towards;
+        // EnterSearch already clears isStopped and sets a fresh budget/queue - do not add a second
+        // isStopped write here.
+        EnterSearch();
+        return true;
+    }
+
+    /// <summary>
+    /// F36 Second Wind: the hunter lets go. Leaves Captured, warps to `warpTo` and stands stunned - no
+    /// movement, no perception - for `stunSeconds`, then wanders. Raises ChaseStateChanged(false): the
+    /// Chase→Captured transition never did (EnterCaptured runs after the transition check), so anything
+    /// listening still thinks it is mid-chase.
+    /// </summary>
+    public bool Release(Vector3 warpTo, float stunSeconds)
+    {
+        if (_agent == null || _state != State.Captured) return false;
+        if (NavMesh.SamplePosition(warpTo, out NavMeshHit hit, 3f, NavMesh.AllAreas)) _agent.Warp(hit.position);
+
+        _state = State.Wander;
+        _wanderIndex = -1;
+        _bustingHidingSpot = false;
+        _hasSight = false;
+        // 0, not stunSeconds: UpdatePerception is skipped for the whole stun (the gate in Update
+        // returns before it runs), so a nonzero value here would double the blindness once it resumes.
+        _sightTimer = 0f;
+        _lastKnownPosition = transform.position;
+        _stunnedUntil = Time.time + stunSeconds;
+        _agent.isStopped = true;
+        _agent.velocity = Vector3.zero;
+        ChaseStateChanged?.Invoke(false);
+        return true;
     }
 
     private Vector3 ModelForward()

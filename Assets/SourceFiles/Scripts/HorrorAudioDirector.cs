@@ -1,3 +1,4 @@
+using System.Collections;
 using UnityEngine;
 
 /// <summary>
@@ -46,6 +47,12 @@ public class HorrorAudioDirector : MonoBehaviour
     [Tooltip("The heartbeat starts carrying from further away as progress climbs")]
     [SerializeField] private float heartbeatRangeAtPeak = 28f;
 
+    [Header("Dread cues")]
+    [Tooltip("Volume of the F23 relocation cue (the low sweep-and-whump)")]
+    [SerializeField] private float relocationCueVolume = 0.8f;
+    [Tooltip("Volume of the F26 whisper phantom")]
+    [SerializeField] private float whisperVolume = 0.18f;
+
     [Header("Panic")]
     [Tooltip("Played on a loop once the hatch opens")]
     [SerializeField] private AudioClip panicClip;
@@ -61,10 +68,14 @@ public class HorrorAudioDirector : MonoBehaviour
     private AudioSource _sting;
     private AudioSource _drone;
     private AudioSource _tension;
+    private AudioSource _whisper;
     private AudioClip _heartbeat;
+    private AudioClip _relocationCue;
+    private AudioClip _whisperClip;
     private float _beatTimer;
     private float _intensity;
     private bool _panicking;
+    private Coroutine _holdBreathRoutine;
 
     /// <summary>Wired by MazeGenerator, which already knows about both actors.</summary>
     public void Bind(Transform player, AIFollower follower, AudioClip sting, AudioClip drone, AudioClip panic)
@@ -118,6 +129,13 @@ public class HorrorAudioDirector : MonoBehaviour
         if (_tension != null) _tension.Stop();
         if (_sting != null) _sting.Stop();
         if (_oneShots != null) _oneShots.Stop();
+        if (_whisper != null) _whisper.Stop();
+
+        if (_holdBreathRoutine != null)
+        {
+            StopCoroutine(_holdBreathRoutine);
+            _holdBreathRoutine = null;
+        }
     }
 
     private void Awake()
@@ -142,6 +160,12 @@ public class HorrorAudioDirector : MonoBehaviour
         _tension.loop = true;
         _tension.spatialBlend = 0f;
         _tension.volume = 0f;
+
+        // Its own 2D source: PlayWhisper drives panStereo directly, which would yank a concurrent
+        // heartbeat sideways if they shared a source.
+        _whisper = gameObject.AddComponent<AudioSource>();
+        _whisper.playOnAwake = false;
+        _whisper.spatialBlend = 0f;
 
         _heartbeat = BuildHeartbeatClip();
     }
@@ -236,6 +260,92 @@ public class HorrorAudioDirector : MonoBehaviour
         _sting.SetScheduledEndTime(AudioSettings.dspTime + 2.5f);
     }
 
+    /// <summary>After PlayCaptureSting stopped the bed for a Second Wind: bring the drone and tension back at their current intensity.</summary>
+    public void ResumeBed()
+    {
+        if (_drone != null && _drone.clip != null && !_drone.isPlaying) _drone.Play();
+        if (_tension != null && _tension.clip != null && !_tension.isPlaying) _tension.Play();
+        SetIntensity(_intensity);
+    }
+
+    /// <summary>F23 telegraph: skips the next heartbeat by holding it silent a little longer than usual.</summary>
+    public void SkipBeat()
+    {
+        _beatTimer = Mathf.Max(_beatTimer, 1.6f);
+    }
+
+    /// <summary>F23 telegraph: a low sweep with a "whump" landing, synthesised once and cached.</summary>
+    public void PlayRelocationCue()
+    {
+        if (_relocationCue == null) _relocationCue = BuildRelocationCueClip();
+        if (_oneShots == null) return;
+
+        _oneShots.pitch = 1f;
+        _oneShots.PlayOneShot(_relocationCue, relocationCueVolume);
+    }
+
+    /// <summary>F26 phantom: a breathy whisper panned hard to one ear. pan is -1 (left) to 1 (right).</summary>
+    public void PlayWhisper(float pan)
+    {
+        if (_whisperClip == null) _whisperClip = BuildWhisperClip();
+        if (_whisper == null) return;
+
+        _whisper.panStereo = Mathf.Clamp(pan, -1f, 1f);
+        _whisper.volume = whisperVolume;
+        _whisper.clip = _whisperClip;
+        _whisper.Play();
+    }
+
+    /// <summary>
+    /// F27's last-star beat: the drone and tension bed drop to silence, held, then restored over the
+    /// final 0.6 s. Restores toward whatever SetIntensity/BeginPanic would want right now, not a value
+    /// captured at the start, so a panic transition landing mid-hold is not undone by the restore.
+    /// </summary>
+    public void HoldBreath(float seconds)
+    {
+        if (_holdBreathRoutine != null) StopCoroutine(_holdBreathRoutine);
+        _holdBreathRoutine = StartCoroutine(HoldBreathRoutine(Mathf.Max(0.1f, seconds)));
+    }
+
+    private IEnumerator HoldBreathRoutine(float seconds)
+    {
+        float restoreSeconds = Mathf.Min(0.6f, seconds);
+        float silentSeconds = seconds - restoreSeconds;
+
+        float t = 0f;
+        while (t < silentSeconds)
+        {
+            // Disabling this component (GameOutcome.EndTheHunt) does not stop a running coroutine, only
+            // its Update - so this loop has to check for itself, every frame, not just at the start.
+            if (!enabled || GameOutcome.IsOver) yield break;
+
+            if (_drone != null) _drone.volume = 0f;
+            if (_tension != null) _tension.volume = 0f;
+            t += Time.deltaTime;
+            yield return null;
+        }
+
+        t = 0f;
+        while (t < restoreSeconds)
+        {
+            if (!enabled || GameOutcome.IsOver) yield break;
+
+            float k = Mathf.Clamp01(t / restoreSeconds);
+            float droneTarget = _panicking ? panicVolume : Mathf.Lerp(droneVolume, droneVolumeAtPeak, _intensity);
+            float tensionTarget = tensionVolume * _intensity;
+            if (_drone != null) _drone.volume = Mathf.Lerp(0f, droneTarget, k);
+            if (_tension != null) _tension.volume = Mathf.Lerp(0f, tensionTarget, k);
+            t += Time.deltaTime;
+            yield return null;
+        }
+
+        if (!enabled || GameOutcome.IsOver) yield break;
+
+        if (_drone != null) _drone.volume = _panicking ? panicVolume : Mathf.Lerp(droneVolume, droneVolumeAtPeak, _intensity);
+        if (_tension != null) _tension.volume = tensionVolume * _intensity;
+        _holdBreathRoutine = null;
+    }
+
     /// <summary>
     /// A two-thump heartbeat built from scratch, because the project has no horror source material.
     /// </summary>
@@ -302,6 +412,89 @@ public class HorrorAudioDirector : MonoBehaviour
         }
 
         AudioClip clip = AudioClip.Create("TensionBed", sampleCount, 1, sampleRate, false);
+        clip.SetData(samples, 0);
+        return clip;
+    }
+
+    /// <summary>A descending sine sweep with a noise "whump" at the end - the sound of it landing behind you.</summary>
+    private static AudioClip BuildRelocationCueClip()
+    {
+        const int sampleRate = 44100;
+        const float duration = 0.9f;
+        const float freqStart = 140f;
+        const float freqEnd = 38f;
+
+        int sampleCount = Mathf.CeilToInt(sampleRate * duration);
+        float[] samples = new float[sampleCount];
+        float sweepPerSecond = (freqEnd - freqStart) / duration;
+
+        for (int i = 0; i < sampleCount; i++)
+        {
+            float t = i / (float)sampleRate;
+            // Integrated frequency (a proper linear chirp), same technique as MazeEscape's ping.
+            float phase = 2f * Mathf.PI * (freqStart * t + 0.5f * sweepPerSecond * t * t);
+            // 1/t-shaped envelope: loud immediately, trails off rather than swelling in.
+            float envelope = 1f / (1f + t * 6f);
+            samples[i] = Mathf.Sin(phase) * envelope;
+        }
+
+        // 12 ms noise transient at the very end - the "whump" of something arriving.
+        int transientSamples = Mathf.RoundToInt(0.012f * sampleRate);
+        int transientStart = Mathf.Max(0, sampleCount - transientSamples);
+        System.Random noise = new System.Random(4242);
+        for (int i = transientStart; i < sampleCount; i++)
+        {
+            float t = (i - transientStart) / (float)transientSamples;
+            samples[i] += (float)(noise.NextDouble() * 2.0 - 1.0) * 0.6f * (1f - t);
+        }
+
+        float peak = 0f;
+        for (int i = 0; i < sampleCount; i++) peak = Mathf.Max(peak, Mathf.Abs(samples[i]));
+        if (peak > 0.0001f)
+        {
+            float gain = 0.85f / peak;
+            for (int i = 0; i < sampleCount; i++) samples[i] *= gain;
+        }
+
+        AudioClip clip = AudioClip.Create("RelocationCue", sampleCount, 1, sampleRate, false);
+        clip.SetData(samples, 0);
+        return clip;
+    }
+
+    /// <summary>Filtered white noise with a rise-fall envelope and a slow tremolo - reads as a breath, not a word.</summary>
+    private static AudioClip BuildWhisperClip()
+    {
+        const int sampleRate = 44100;
+        const float duration = 0.7f;
+        const float lowPass = 0.08f;
+
+        int sampleCount = Mathf.CeilToInt(sampleRate * duration);
+        float[] samples = new float[sampleCount];
+        System.Random noise = new System.Random(9001);
+        float y = 0f;
+
+        for (int i = 0; i < sampleCount; i++)
+        {
+            float t = i / (float)sampleRate;
+            float x = (float)(noise.NextDouble() * 2.0 - 1.0);
+            y += lowPass * (x - y);
+
+            float envelope = Mathf.Sin(Mathf.PI * t / duration);
+            envelope *= envelope;
+            float tremolo = 0.75f + 0.25f * Mathf.Sin(2f * Mathf.PI * 2f * t);
+
+            samples[i] = y * envelope * tremolo;
+        }
+
+        float peak = 0f;
+        for (int i = 0; i < sampleCount; i++) peak = Mathf.Max(peak, Mathf.Abs(samples[i]));
+        if (peak > 0.0001f)
+        {
+            float gain = 0.9f / peak;
+            for (int i = 0; i < sampleCount; i++) samples[i] *= gain;
+        }
+
+        AudioClip clip = AudioClip.Create("Whisper", sampleCount, 1, sampleRate, false);
         clip.SetData(samples, 0);
         return clip;
     }
