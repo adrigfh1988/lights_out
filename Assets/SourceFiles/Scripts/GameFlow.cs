@@ -50,6 +50,7 @@ public static class GameFlow
         PendingSeed = 0;
         PlayerWallet.ResetCampaign();
         PlayerInventory.ResetCampaign();
+        DreadDirector.ResetCampaign();
         Reload();
     }
 

@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: 02c828f75e270754db6b763574d05654
+timeCreated: 1473243814
+licenseType: Store
+NativeFormatImporter:
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 74842
+  packageName: Adam Character Pack | Characters
+  packageVersion: 3.0.0
+  assetPath: Assets/UnityTechnologies/Adam Character Pack/Adam/Adam_AnimationController.controller
+  uploadId: 998250

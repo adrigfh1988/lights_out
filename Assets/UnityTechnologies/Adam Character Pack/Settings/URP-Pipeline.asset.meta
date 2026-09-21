@@ -1,0 +1,15 @@
+fileFormatVersion: 2
+guid: edd00f45e8af34461adbdd4e98184bac
+NativeFormatImporter:
+  externalObjects: {}
+  mainObjectFileID: 11400000
+  userData: 
+  assetBundleName: 
+  assetBundleVariant: 
+AssetOrigin:
+  serializedVersion: 1
+  productId: 74842
+  packageName: Adam Character Pack | Characters
+  packageVersion: 3.0.0
+  assetPath: Assets/UnityTechnologies/Adam Character Pack/Settings/URP-Pipeline.asset
+  uploadId: 998250

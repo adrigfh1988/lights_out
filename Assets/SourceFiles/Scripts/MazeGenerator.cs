@@ -133,6 +133,8 @@ public class MazeGenerator : MonoBehaviour
     private readonly List<Transform> _stars = new List<Transform>();
     /// <summary>Cells SpawnStars chose. Kept so SpawnShards can stay clear of them.</summary>
     private readonly List<Vector2Int> _starCells = new List<Vector2Int>();
+    /// <summary>F45: cell centres two steps from star i, around a corner. Parallel to _stars/_starCells.</summary>
+    private readonly List<List<Vector3>> _ambushCells = new List<List<Vector3>>();
     private readonly List<Material> _runtimeMaterials = new List<Material>();
     private readonly List<Vector2Int> _lockerCells = new List<Vector2Int>();
     // Direction from a locker cell's centre toward the wall its locker stands against
@@ -176,6 +178,27 @@ public class MazeGenerator : MonoBehaviour
             origin.x + (x + 0.5f) * cellSize,
             FloorTop,
             origin.z + (z + 0.5f) * cellSize);
+    }
+
+    /// <summary>F45: cell centres two steps from star `starIndex`, around a corner from it - never a straight line to it. Empty for an out-of-range index or a star that sits in a dead end.</summary>
+    public IReadOnlyList<Vector3> AmbushCellsFor(int starIndex)
+    {
+        if (starIndex < 0 || starIndex >= _ambushCells.Count) return System.Array.Empty<Vector3>();
+        return _ambushCells[starIndex];
+    }
+
+    /// <summary>A junction or corner cell (not a straight run, not a dead end): where something would stand to peek. False for a point outside the maze grid.</summary>
+    public bool IsCornerCell(Vector3 cellCenter)
+    {
+        int x = Mathf.FloorToInt((cellCenter.x - origin.x) / cellSize);
+        int z = Mathf.FloorToInt((cellCenter.z - origin.z) / cellSize);
+        if (x < 0 || x >= width || z < 0 || z >= height) return false;
+
+        if (WallCount(x, z) > 2) return false;
+
+        bool northSouth = _wallN[x, z] && _wallS[x, z] && !_wallE[x, z] && !_wallW[x, z];
+        bool eastWest = _wallE[x, z] && _wallW[x, z] && !_wallN[x, z] && !_wallS[x, z];
+        return !northSouth && !eastWest;
     }
 
     private void Awake()
@@ -1423,6 +1446,51 @@ public class MazeGenerator : MonoBehaviour
         {
             Debug.LogWarning($"MazeGenerator: only {chosen.Count} of {starCount} stars fit in the maze.", this);
         }
+
+        PrecomputeAmbushCells();
+    }
+
+    /// <summary>
+    /// F45: for every star, every cell that sits two open-passage steps away with a turn in between -
+    /// i.e. around a corner from it, never a straight line down the same corridor. Costs nothing at
+    /// runtime since it is computed once here, right after the stars that define it exist.
+    /// </summary>
+    private void PrecomputeAmbushCells()
+    {
+        _ambushCells.Clear();
+
+        foreach (Vector2Int star in _starCells)
+        {
+            List<Vector3> cells = new List<Vector3>();
+
+            // A dead end (one open wall, three closed) has only one way in - never camp the only door.
+            if (WallCount(star.x, star.y) != 3)
+            {
+                for (int dir = 0; dir < 4; dir++)
+                {
+                    if (IsWallClosed(star.x, star.y, dir)) continue;
+                    Vector2Int n = Neighbour(star, dir);
+                    if (n.x < 0 || n.x >= width || n.y < 0 || n.y >= height) continue;
+
+                    for (int dir2 = 0; dir2 < 4; dir2++)
+                    {
+                        // Same direction twice is a straight line through n, not a corner.
+                        if (dir2 == dir) continue;
+                        if (IsWallClosed(n.x, n.y, dir2)) continue;
+
+                        Vector2Int a = Neighbour(n, dir2);
+                        if (a.x < 0 || a.x >= width || a.y < 0 || a.y >= height) continue;
+                        // The reverse direction leads straight back to the star cell itself.
+                        if (a == star) continue;
+
+                        Vector3 position = CellCenter(a.x, a.y);
+                        if (!cells.Contains(position)) cells.Add(position);
+                    }
+                }
+            }
+
+            _ambushCells.Add(cells);
+        }
     }
 
     /// <summary>
@@ -1743,6 +1811,7 @@ public class MazeGenerator : MonoBehaviour
             hidingFronts.Add(locker.FrontPosition);
         }
         aiFollower.SetHidingSpots(hidingFronts);
+        aiFollower.SetAmbushProvider(this);
 
         AIPresence presence = aiFollower.GetComponent<AIPresence>();
         if (presence == null) presence = aiFollower.gameObject.AddComponent<AIPresence>();

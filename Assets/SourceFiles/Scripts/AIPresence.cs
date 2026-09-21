@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 using UnityEngine.AI;
 
@@ -32,6 +33,31 @@ public class AIPresence : MonoBehaviour
     [Tooltip("Emission multiplier. Needs to be well above 1 to punch through fog and catch bloom.")]
     [SerializeField] private float eyeEmission = 4f;
     [SerializeField] private float eyeSize = 0.075f;
+    [Tooltip("Bone name used to anchor the eyes/face light when the model is not Humanoid, or has no Head-mapped bone")]
+    [SerializeField] private string headBoneName = "Head";
+    [Tooltip("Eye bone names. Used when the rig actually has eye bones (the Timmy robot does); a rig without them (the zombie) falls back to an offset from the head instead.")]
+    [SerializeField] private string leftEyeBoneName = "Left_Eye";
+    [SerializeField] private string rightEyeBoneName = "Right_Eye";
+    [Tooltip("Eye offset from the head bone when the rig has no eye bones, in the Animator's own frame (m)")]
+    [SerializeField] private float eyeUp = 0.06f;
+    [SerializeField] private float eyeForward = 0.11f;
+    [SerializeField] private float eyeSpacing = 0.055f;
+
+    [Header("Face (F44)")]
+    [Tooltip("Colour and range of the face light built at the eye midpoint while staring")]
+    [SerializeField] private float faceLightIntensity = 2.2f;
+    [SerializeField] private float faceLightRange = 2.5f;
+    [SerializeField] private float watchingEyeScale = 1.6f;
+    [SerializeField] private float watchingEyeEmissionScale = 1.75f;
+    [SerializeField] private float lurkingEyeEmissionScale = 0.3f;
+
+    /// <summary>The mode the built face (eyes + light) currently reads as.</summary>
+    public enum FaceMode
+    {
+        Normal,
+        Watching,
+        Lurking
+    }
 
     private NavMeshAgent _agent;
     private AudioSource _footstepSource;
@@ -39,6 +65,9 @@ public class AIPresence : MonoBehaviour
     private float _distanceSinceStep;
 
     private Material _eyeMaterial;
+    private Light _faceLight;
+    private readonly List<Transform> _eyes = new List<Transform>();
+    private FaceMode _faceMode = FaceMode.Normal;
     private float _holdRemaining;
     private bool _humMuted;
 
@@ -129,13 +158,60 @@ public class AIPresence : MonoBehaviour
         }
     }
 
-    /// <summary>Brightens/dims the eye glow. Used by F27's second lamp-death wave.</summary>
+    /// <summary>
+    /// Ends a Hold() early: the "it's back" footstep plays next frame instead of waiting out the full
+    /// hold. Only acts on a genuine hold - forcing one on nothing held would fire a spurious footstep.
+    /// </summary>
+    public void ReleaseHold()
+    {
+        if (_holdRemaining > 0f) _holdRemaining = 0.001f;
+    }
+
+    /// <summary>Brightens/dims the eye glow. Used by F27's second lamp-death wave. Re-applies the current face mode, which multiplies this base.</summary>
     public void SetEyeEmission(float emission)
     {
         eyeEmission = emission;
+        ApplyFaceMode();
+    }
+
+    /// <summary>F44: switches the eyes and the face light between idle, watching (the stare) and lurking (the ambush).</summary>
+    public void SetFaceMode(FaceMode mode)
+    {
+        _faceMode = mode;
+        ApplyFaceMode();
+    }
+
+    private void ApplyFaceMode()
+    {
+        float eyeScale = eyeSize;
+        float eyeEmissionScale = 1f;
+        float lightIntensity = 0f;
+
+        switch (_faceMode)
+        {
+            case FaceMode.Watching:
+                eyeScale = eyeSize * watchingEyeScale;
+                eyeEmissionScale = watchingEyeEmissionScale;
+                lightIntensity = faceLightIntensity;
+                break;
+            case FaceMode.Lurking:
+                eyeEmissionScale = lurkingEyeEmissionScale;
+                break;
+        }
+
         if (_eyeMaterial != null)
         {
-            _eyeMaterial.SetColor("_EmissionColor", eyeColor * eyeEmission);
+            _eyeMaterial.SetColor("_EmissionColor", eyeColor * eyeEmission * eyeEmissionScale);
+        }
+
+        foreach (Transform eye in _eyes)
+        {
+            if (eye != null) eye.localScale = WorldToLocalScale(eye.parent, eyeScale);
+        }
+
+        if (_faceLight != null)
+        {
+            _faceLight.intensity = lightIntensity;
         }
     }
 
@@ -144,7 +220,13 @@ public class AIPresence : MonoBehaviour
     {
         if (_humSource != null) _humSource.Stop();
         if (_footstepSource != null) _footstepSource.Stop();
+        SetFaceMode(FaceMode.Normal);
         enabled = false;
+    }
+
+    private void OnDestroy()
+    {
+        if (_eyeMaterial != null) Destroy(_eyeMaterial);
     }
 
     private AudioSource CreateSource(string sourceName, float maxDistance, bool loop)
@@ -162,6 +244,12 @@ public class AIPresence : MonoBehaviour
         return source;
     }
 
+    /// <summary>
+    /// Builds the two glowing eyes and the face light. Works with either rig this project has used: the
+    /// Timmy robot, which has actual Left_Eye/Right_Eye bones, and the zombie body, which only has a
+    /// Head bone - eyes are then placed by a fixed offset from it, in the Animator's own frame, so the
+    /// construction does not care which way the rig's rest pose happens to face.
+    /// </summary>
     private void BuildEyes(Material emissiveSource)
     {
         // Spheres, not point lights: a small point light lights the wall beside it but is not itself
@@ -173,23 +261,124 @@ public class AIPresence : MonoBehaviour
         eyeMaterial.SetColor("_EmissionColor", eyeColor * eyeEmission);
         _eyeMaterial = eyeMaterial;
 
-        foreach (string boneName in new[] { "Left_Eye", "Right_Eye" })
+        Animator modelAnimator = GetComponentInChildren<Animator>();
+
+        Transform head = modelAnimator != null && modelAnimator.isHuman
+            ? modelAnimator.GetBoneTransform(HumanBodyBones.Head)
+            : null;
+        if (head == null) head = FindDeep(transform, headBoneName);
+
+        // Pose the skeleton along the Animator's rest frame before reading any bone position - this
+        // runs from PlaceAI inside Awake, before any animation frame has been evaluated, so without
+        // this call the bones would still be in the FBX's raw import pose.
+        modelAnimator?.Update(0f);
+
+        // A Humanoid rig with mapped eye bones (Adam maps LeftEye/RightEye to his eye sclera meshes)
+        // gets the red dots exactly in its sockets; anything else falls back to the name lookup.
+        Transform leftEyeBone = null, rightEyeBone = null;
+        if (modelAnimator != null && modelAnimator.isHuman)
         {
-            Transform bone = FindDeep(transform, boneName);
-            if (bone == null) continue;
-
-            GameObject eye = GameObject.CreatePrimitive(PrimitiveType.Sphere);
-            eye.name = boneName + "_Glow";
-            Destroy(eye.GetComponent<Collider>());
-            eye.transform.SetParent(bone, false);
-            eye.transform.localPosition = Vector3.zero;
-            eye.transform.localScale = Vector3.one * eyeSize;
-
-            MeshRenderer renderer = eye.GetComponent<MeshRenderer>();
-            renderer.sharedMaterial = eyeMaterial;
-            renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
-            renderer.receiveShadows = false;
+            leftEyeBone = modelAnimator.GetBoneTransform(HumanBodyBones.LeftEye);
+            rightEyeBone = modelAnimator.GetBoneTransform(HumanBodyBones.RightEye);
         }
+        if (leftEyeBone == null || rightEyeBone == null)
+        {
+            leftEyeBone = FindDeep(transform, leftEyeBoneName);
+            rightEyeBone = FindDeep(transform, rightEyeBoneName);
+        }
+
+        Vector3 leftEyeWorld;
+        Vector3 rightEyeWorld;
+        Transform leftParent;
+        Transform rightParent;
+
+        if (leftEyeBone != null && rightEyeBone != null)
+        {
+            leftEyeWorld = leftEyeBone.position;
+            rightEyeWorld = rightEyeBone.position;
+            leftParent = leftEyeBone;
+            rightParent = rightEyeBone;
+        }
+        else if (head != null)
+        {
+            // The face's own frame, not the Animator node's: a Generic rig can face sideways inside
+            // its node (AIFollower.modelFacingYaw), and the eyes must sit on the face.
+            AIFollower follower = GetComponent<AIFollower>();
+            Vector3 forward = follower != null ? follower.VisualForward
+                : (modelAnimator != null ? modelAnimator.transform.forward : transform.forward);
+            forward.y = 0f;
+            if (forward.sqrMagnitude < 0.0001f) forward = Vector3.forward;
+            forward.Normalize();
+            Vector3 right = Vector3.Cross(Vector3.up, forward);
+
+            Vector3 forwardOffset = forward * eyeForward;
+            Vector3 upOffset = Vector3.up * eyeUp;
+            Vector3 rightOffset = right * eyeSpacing;
+
+            leftEyeWorld = head.position + forwardOffset + upOffset - rightOffset;
+            rightEyeWorld = head.position + forwardOffset + upOffset + rightOffset;
+            leftParent = head;
+            rightParent = head;
+        }
+        else
+        {
+            Debug.LogWarning("AIPresence: no eye bones and no Head bone found on the model; eyes and the face light are skipped, SetFaceMode will have nothing to drive.", this);
+            return;
+        }
+
+        Transform leftEye = BuildEye("LeftEye_Glow", leftEyeWorld, leftParent, eyeMaterial);
+        Transform rightEye = BuildEye("RightEye_Glow", rightEyeWorld, rightParent, eyeMaterial);
+        _eyes.Add(leftEye);
+        _eyes.Add(rightEye);
+
+        Vector3 midpoint = (leftEyeWorld + rightEyeWorld) * 0.5f;
+        Transform lightParent = head != null ? head : (modelAnimator != null ? modelAnimator.transform : transform);
+        BuildFaceLight(midpoint, lightParent);
+    }
+
+    private Transform BuildEye(string eyeName, Vector3 worldPosition, Transform parent, Material material)
+    {
+        GameObject eye = GameObject.CreatePrimitive(PrimitiveType.Sphere);
+        eye.name = eyeName;
+        Destroy(eye.GetComponent<Collider>());
+        eye.transform.SetPositionAndRotation(worldPosition, parent.rotation);
+        eye.transform.SetParent(parent, true);
+        // eyeSize is a world size. A rig exported with a scaled armature root (ZombieSmooth.fbx carries
+        // 107x on its root node) would otherwise turn a 7.5 cm sphere into an 8 m one.
+        eye.transform.localScale = WorldToLocalScale(parent, eyeSize);
+
+        MeshRenderer renderer = eye.GetComponent<MeshRenderer>();
+        renderer.sharedMaterial = material;
+        renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        renderer.receiveShadows = false;
+
+        return eye.transform;
+    }
+
+    /// <summary>Local scale that gives a uniform world size of `worldSize` under `parent`, whatever the parent chain's scale is.</summary>
+    private static Vector3 WorldToLocalScale(Transform parent, float worldSize)
+    {
+        Vector3 lossy = parent.lossyScale;
+        return new Vector3(
+            worldSize / Mathf.Max(0.0001f, Mathf.Abs(lossy.x)),
+            worldSize / Mathf.Max(0.0001f, Mathf.Abs(lossy.y)),
+            worldSize / Mathf.Max(0.0001f, Mathf.Abs(lossy.z)));
+    }
+
+    /// <summary>F44's red: a child point light at the eye midpoint (it lights the wall beside it, it is not geometry), parented to the head.</summary>
+    private void BuildFaceLight(Vector3 worldMidpoint, Transform parent)
+    {
+        GameObject lightHolder = new GameObject("FaceLight");
+        lightHolder.transform.SetPositionAndRotation(worldMidpoint, parent.rotation);
+        lightHolder.transform.SetParent(parent, true);
+
+        Light light = lightHolder.AddComponent<Light>();
+        light.type = LightType.Point;
+        light.color = eyeColor;
+        light.range = faceLightRange;
+        light.intensity = 0f;
+        light.shadows = LightShadows.None;
+        _faceLight = light;
     }
 
     private static Transform FindDeep(Transform root, string childName)

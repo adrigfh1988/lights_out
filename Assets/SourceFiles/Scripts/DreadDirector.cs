@@ -78,6 +78,8 @@ public class DreadDirector : MonoBehaviour
     [SerializeField] private string lineNear = "It's right behind you.";
     [SerializeField] private string lineLightsDying = "The lights are dying.";
     [SerializeField] private string lineItKnows = "It knows.";
+    [Tooltip("F45: shown once per campaign, the first time an ambush ends because the ambushed star was actually taken")]
+    [SerializeField] private string lineAmbushed = "It was waiting.";
 
     [Header("F27 - reacting to the count")]
     [SerializeField] private float flickerWaveSpeed = 12f;
@@ -129,8 +131,24 @@ public class DreadDirector : MonoBehaviour
     private int _originalLiveLampCount = -1;
     private System.Random _lampRng;
 
+    // F45: shown once per campaign. With Enter Play Mode > Reload Domain disabled this static would
+    // otherwise survive between presses of Play, same as GameFlow's own statics - reset alongside them.
+    private static bool s_ambushSubtitleShown;
+
     /// <summary>True while a relocation telegraph is playing out. PhantomDirector skips a phantom while this is true - a telegraph is already one.</summary>
     public bool IsTelegraphing => _isTelegraphing;
+
+    /// <summary>F45's once-per-campaign subtitle flag. Cleared by GameFlow.ReturnToMenu - the economy and dread beats both live for one campaign only.</summary>
+    public static void ResetCampaign()
+    {
+        s_ambushSubtitleShown = false;
+    }
+
+    [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
+    private static void ResetStatics()
+    {
+        s_ambushSubtitleShown = false;
+    }
 
     private float Progress => _total > 0 ? _collected / (float)_total : 0f;
 
@@ -151,9 +169,19 @@ public class DreadDirector : MonoBehaviour
 
         // Configure runs after OnEnable when this is added at runtime, so unsubscribe first - harmless
         // if it was never subscribed, and required so a re-Configure cannot double-subscribe.
-        if (_follower != null) _follower.ChaseStateChanged -= HandleChaseStateChanged;
+        if (_follower != null)
+        {
+            _follower.ChaseStateChanged -= HandleChaseStateChanged;
+            _follower.StareStateChanged -= HandleStareStateChanged;
+            _follower.AmbushStateChanged -= HandleAmbushStateChanged;
+        }
         _follower = follower;
-        if (_follower != null) _follower.ChaseStateChanged += HandleChaseStateChanged;
+        if (_follower != null)
+        {
+            _follower.ChaseStateChanged += HandleChaseStateChanged;
+            _follower.StareStateChanged += HandleStareStateChanged;
+            _follower.AmbushStateChanged += HandleAmbushStateChanged;
+        }
 
         if (profile != null)
         {
@@ -173,7 +201,12 @@ public class DreadDirector : MonoBehaviour
         GameManager.ProgressChanged -= HandleProgress;
         GameManager.AllStarsCollected -= HandleAllStarsCollected;
         Pickup.OnCollectedAt -= HandleStarTaken;
-        if (_follower != null) _follower.ChaseStateChanged -= HandleChaseStateChanged;
+        if (_follower != null)
+        {
+            _follower.ChaseStateChanged -= HandleChaseStateChanged;
+            _follower.StareStateChanged -= HandleStareStateChanged;
+            _follower.AmbushStateChanged -= HandleAmbushStateChanged;
+        }
 
         StopAllCoroutines();
         _isTelegraphing = false;
@@ -419,6 +452,9 @@ public class DreadDirector : MonoBehaviour
         float progress = Progress;
         if (progress < startProgress || _follower.IsHunting) return false;
         if (_follower.IsChasing || _follower.IsCaptured) return false;
+        // F44/F45: a stare is already a reaction to being seen, and an ambush is a beat of its own -
+        // neither should be interrupted by a relocation telegraph.
+        if (_follower.IsStaring || _follower.IsAmbushing) return false;
         if (Time.time - _lastChaseEndTime < chaseCooldown) return false;
         if (_stealth != null && _stealth.Hidden) return false;
         if (!PlayerMovedRecently()) return false;
@@ -485,6 +521,21 @@ public class DreadDirector : MonoBehaviour
         if (!chasing) _lastChaseEndTime = Time.time;
     }
 
+    /// <summary>F44: a stare ending counts as a chase ending for the relocation cooldown - it was every bit as close a call.</summary>
+    private void HandleStareStateChanged(bool staring)
+    {
+        if (!staring) _lastChaseEndTime = Time.time;
+    }
+
+    /// <summary>F45: the first time an ambush ends because its star was actually taken, show the subtitle - once per campaign.</summary>
+    private void HandleAmbushStateChanged(bool ambushing)
+    {
+        if (ambushing || s_ambushSubtitleShown || _follower == null || !_follower.LastAmbushEndedOnPickup) return;
+
+        s_ambushSubtitleShown = true;
+        if (_hud != null) _hud.ShowSubtitle(lineAmbushed, subtitleSeconds);
+    }
+
     // ---------------------------------------------------------------- F27: reacting to the count
 
     private void HandleProgress(int collected, int total)
@@ -526,6 +577,12 @@ public class DreadDirector : MonoBehaviour
                 lamp.Blink(flickerDuration, delay);
             }
         }
+
+        // F45: the hunter is already stepping out toward this exact pickup (TensionDirector's own
+        // Pickup.OnCollectedAt subscription - added earlier, so it runs first - just called HearNoise,
+        // which ends a matching ambush synchronously and stamps LastAmbushEndTime). Warping it elsewhere
+        // would waste that beat, so this pickup arms no relocation.
+        if (_follower != null && Time.time - _follower.LastAmbushEndTime < 0.5f) return;
 
         // Arm one relocation (23.2 rule 6). The rules (progress, not chasing, not hidden, not hunting, a
         // valid spot) are still checked every tick inside the window; if they never pass, the window

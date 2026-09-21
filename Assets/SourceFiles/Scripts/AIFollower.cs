@@ -85,12 +85,48 @@ public class AIFollower : MonoBehaviour
     [Tooltip("How close a hiding spot has to be to the last known position to be checked during a search")]
     [SerializeField] private float hidingSpotSearchRadius = 6f;
 
+    [Header("Stare (F44)")]
+    [Tooltip("Sight while progress is below this stares instead of chasing. 1 = always stare, 0 = never. Set per floor by FloorProfile.")]
+    [Range(0f, 1f)] [SerializeField] private float stareCeiling;
+    [Tooltip("How far from the player the vantage point is chosen (m). Must be inside viewDistance.")]
+    [SerializeField] private float stareDistance = 9f;
+    [SerializeField] private float stareDistanceTolerance = 1.5f;
+    [Tooltip("Inside this a stare becomes a chase, and a first sighting inside it is a chase (m)")]
+    [SerializeField] private float stareBreakDistance = 6f;
+    [Tooltip("A stare this long becomes a chase (s)")]
+    [SerializeField] private float stareCommitSeconds = 5f;
+    [Tooltip("Speed while the player is looking at it, as a fraction of the wander speed. 0 = frozen.")]
+    [Range(0f, 1f)] [SerializeField] private float stareWatchedSpeedScale = 0.3f;
+    [Tooltip("Viewport margin for the 'is the player looking at me' test, so the freeze does not twitch at the screen edge")]
+    [SerializeField] private float watchedViewportMargin = 0.08f;
+
+    [Header("Rush (F44)")]
+    [Tooltip("Speed of the run to the vantage point (m/s). Still clamped to the player's sprint x maxSpeedFraction in Start.")]
+    [SerializeField] private float rushSpeed = 4.5f;
+    [Tooltip("The rush stops and stares in place after this (s)")]
+    [SerializeField] private float rushMaxSeconds = 2.5f;
+    [Tooltip("A vantage point farther than this by path is not worth running to (m)")]
+    [SerializeField] private float rushMaxPathLength = 16f;
+
+    [Header("Ambush (F45)")]
+    [Range(0f, 1f)] [SerializeField] private float ambushBias = 0.75f;
+    [SerializeField] private float ambushWaitSeconds = 90f;
+    [SerializeField] private float ambushHearingBoost = 1.5f;
+    [Tooltip("Seconds before the same star may be ambushed again")]
+    [SerializeField] private float ambushRepeatCooldown = 60f;
+    [Tooltip("A pickup this close to the ambushed star counts as that star being taken (m)")]
+    [SerializeField] private float ambushStarMatchRadius = 1.5f;
+    [Tooltip("Never choose an ambush cell this close to the player (m) - roughly one cell width")]
+    [SerializeField] private float ambushPlayerExclusionRadius = 4.5f;
+
     [Header("Rotation")]
     [SerializeField] private float turnSpeed = 540f;
 
     [Header("Animation")]
     [SerializeField] private Animator animator;
     [SerializeField] private float animationBlendRate = 10f;
+    [Tooltip("Yaw (degrees) the visible mesh faces relative to its Animator node's +Z. 0 for the Timmy robot. A Generic rig whose model faces sideways in its file (ZombieSmooth.fbx faces +X) needs this so the sight cone, the turn-to-face and the eyes all use the face, not the node axis. Written by LIGHTS OUT > Build Hunter Body.")]
+    [SerializeField] private float modelFacingYaw = 0f;
 
     private static readonly int AnimSpeed = Animator.StringToHash("Speed");
     private static readonly int AnimGrounded = Animator.StringToHash("Grounded");
@@ -101,7 +137,9 @@ public class AIFollower : MonoBehaviour
         Chase,
         Wander,
         Search,
-        Captured
+        Captured,
+        Stare,
+        Ambush
     }
 
     private NavMeshAgent _agent;
@@ -150,8 +188,35 @@ public class AIFollower : MonoBehaviour
     private float _hearingScale = 1f;
     private bool _hunting;
 
+    // F44/F45: the maze (for AmbushCellsFor/IsCornerCell), the player's camera (for the watched test)
+    // and the sibling presence component (face + hum), all resolved once in Start.
+    private MazeGenerator _maze;
+    private Camera _camera;
+    private AIPresence _presence;
+
+    // Stare (F44)
+    private float _stareTimer;
+    private float _rushTimer;
+    private bool _rushing;
+    private Vector3 _vantage;
+    private bool _hasVantage;
+    private bool _watched;
+
+    // Ambush (F45)
+    private int _ambushStarIndex = -1;
+    private Vector3 _ambushStarPosition;
+    private float _ambushWaitTimer;
+    private bool _ambushArrived;
+    private readonly Dictionary<int, float> _ambushCooldownUntil = new Dictionary<int, float>();
+
     /// <summary>Raised when the follower starts or stops actively chasing the player.</summary>
     public event Action<bool> ChaseStateChanged;
+
+    /// <summary>Raised when the follower starts or stops a stare (the run-then-watch below the stare ceiling).</summary>
+    public event Action<bool> StareStateChanged;
+
+    /// <summary>Raised when the follower starts or stops lying in wait near a star the player is heading for.</summary>
+    public event Action<bool> AmbushStateChanged;
 
     /// <summary>Raised once, when the follower reaches a player it can see.</summary>
     public event Action PlayerCaught;
@@ -164,6 +229,24 @@ public class AIFollower : MonoBehaviour
 
     /// <summary>True once the follower has caught the player.</summary>
     public bool IsCaptured => _state == State.Captured;
+
+    /// <summary>True while rushing to, or holding, a vantage point after a sighting below the stare ceiling.</summary>
+    public bool IsStaring => _state == State.Stare;
+
+    /// <summary>True while lying in wait near a star the player is heading toward.</summary>
+    public bool IsAmbushing => _state == State.Ambush;
+
+    /// <summary>True while the player's camera is actually looking at the hunter (drives the stare freeze).</summary>
+    public bool IsWatched => _watched;
+
+    /// <summary>Position of the star currently being ambushed. Only meaningful while IsAmbushing.</summary>
+    public Vector3 AmbushStarPosition => _ambushStarPosition;
+
+    /// <summary>True if the most recent ambush ended because the ambushed star was actually taken, rather than by being heard out of or a sighting.</summary>
+    public bool LastAmbushEndedOnPickup { get; private set; }
+
+    /// <summary>Time.time the most recent ambush ended, whatever the reason - DreadDirector uses "very recently" to skip arming a relocation for a star the hunter is already stepping out toward.</summary>
+    public float LastAmbushEndTime { get; private set; } = -9999f;
 
     /// <summary>True once the hatch is open and the endgame chase is on (mirrors SetThreatLevel's hunting flag).</summary>
     public bool IsHunting => _hunting;
@@ -196,6 +279,21 @@ public class AIFollower : MonoBehaviour
     /// <summary>Chance a wander leg heads for the cell nearest the player instead of a star or random cell. 0 at zero progress.</summary>
     private float HunchBias => Mathf.Lerp(0f, hunchBiasAtPeak, _threat);
 
+    /// <summary>Inside this a stare becomes a chase. No lerp: a fairness boundary, not a difficulty dial.</summary>
+    private float EffectiveStareBreakDistance => stareBreakDistance;
+
+    /// <summary>How long a stare lasts before becoming a chase. Lerps 150%..100% of the floor's value - longer stares early in a floor.</summary>
+    private float EffectiveStareCommitSeconds => Mathf.Lerp(stareCommitSeconds * 1.5f, stareCommitSeconds, _threat);
+
+    /// <summary>Speed while watched, as a fraction of WanderSpeed(). Read raw - see EffectiveAmbushBias.</summary>
+    private float EffectiveStareWatchedSpeedScale => stareWatchedSpeedScale;
+
+    /// <summary>Chance a wander leg becomes an ambush. Read raw: a threat lerp would make floor 1 before the first star nearly ambush-free, the opposite of the intent.</summary>
+    private float EffectiveAmbushBias => ambushBias;
+
+    /// <summary>Maximum time lying in wait. Read raw.</summary>
+    private float EffectiveAmbushWait => ambushWaitSeconds;
+
     /// <summary>Corridor positions the follower patrols when it cannot see the player.</summary>
     public void SetWanderPoints(IEnumerable<Vector3> points)
     {
@@ -227,6 +325,12 @@ public class AIFollower : MonoBehaviour
         }
     }
 
+    /// <summary>F44/F45: supplies AmbushCellsFor and IsCornerCell. Called from MazeGenerator.PlaceAI, before this component's Awake.</summary>
+    public void SetAmbushProvider(MazeGenerator maze)
+    {
+        _maze = maze;
+    }
+
     /// <summary>
     /// How dangerous the follower currently is, from 0 (nothing collected, barely stirring) to 1.
     /// <paramref name="hunting"/> is the endgame: once the hatch is open it runs everywhere, whether
@@ -255,6 +359,17 @@ public class AIFollower : MonoBehaviour
         loseSightTime = profile.LoseSightTime;
         patrolBias = profile.PatrolBias;
         searchBudget = profile.SearchBudget;
+
+        stareCeiling = profile.StareCeiling;
+        stareDistance = profile.StareDistance;
+        stareBreakDistance = profile.StareBreakDistance;
+        stareCommitSeconds = profile.StareCommitSeconds;
+        stareWatchedSpeedScale = profile.StareWatchedSpeedScale;
+        rushSpeed = profile.RushSpeed;
+        rushMaxSeconds = profile.RushMaxSeconds;
+        ambushBias = profile.AmbushBias;
+        ambushWaitSeconds = profile.AmbushWaitSeconds;
+        ambushHearingBoost = profile.AmbushHearingBoost;
     }
 
     /// <summary>Speed while patrolling or searching.</summary>
@@ -288,12 +403,31 @@ public class AIFollower : MonoBehaviour
             animator = GetComponentInChildren<Animator>();
         }
 
-        // The robot model is rotated inside this object (the prefab's "Robot" child is at 90 degrees),
-        // so turn this object by the opposite amount to make the visible model face the target
-        if (animator != null)
+        _modelYawOffset = ComputeModelYawOffset();
+    }
+
+    /// <summary>
+    /// Yaw from this object's forward to the direction the visible mesh actually faces: the Animator
+    /// node's own rotation (the robot prefab's "Robot" child is at 90 degrees) plus modelFacingYaw for a
+    /// rig whose mesh faces sideways inside that node. Computed on demand rather than cached only in
+    /// Awake, because AIPresence.BuildEyes runs from MazeGenerator.PlaceAI before this Awake.
+    /// </summary>
+    private float ComputeModelYawOffset()
+    {
+        Animator model = animator != null ? animator : GetComponentInChildren<Animator>();
+        float nodeYaw = model != null
+            ? Vector3.SignedAngle(FlatDirection(transform.forward), FlatDirection(model.transform.forward), Vector3.up)
+            : 0f;
+        return nodeYaw + modelFacingYaw;
+    }
+
+    /// <summary>World direction the visible mesh faces. Safe to call before Awake.</summary>
+    public Vector3 VisualForward
+    {
+        get
         {
-            _modelYawOffset = Vector3.SignedAngle(
-                FlatDirection(transform.forward), FlatDirection(animator.transform.forward), Vector3.up);
+            Vector3 forward = FlatDirection(Quaternion.AngleAxis(ComputeModelYawOffset(), Vector3.up) * transform.forward);
+            return forward.sqrMagnitude > 0.0001f ? forward.normalized : Vector3.forward;
         }
     }
 
@@ -311,6 +445,14 @@ public class AIFollower : MonoBehaviour
             _stealth = target.GetComponent<PlayerStealthState>();
         }
 
+        _presence = GetComponent<AIPresence>();
+
+        // The rig lives on the same object target points at (the one with the CharacterController -
+        // see FindTarget), so a direct GetComponent resolves it without walking the hierarchy.
+        FirstPersonRig rig = target != null ? target.GetComponent<FirstPersonRig>() : null;
+        _camera = rig != null ? rig.PlayerCamera : null;
+        if (_camera == null) _camera = Camera.main;
+
         // It must never be able to out-sprint the player, whatever the Inspector or a saved scene says.
         ThirdPersonController player = target != null ? target.GetComponent<ThirdPersonController>() : null;
         if (player != null)
@@ -324,6 +466,8 @@ public class AIFollower : MonoBehaviour
             runSpeed = Mathf.Min(runSpeed, cap);
             moveSpeed = Mathf.Min(moveSpeed, cap);
             dormantSpeed = Mathf.Min(dormantSpeed, cap);
+            // The one fast moment (F44's rush) still must never be able to out-sprint the player.
+            rushSpeed = Mathf.Min(rushSpeed, cap);
         }
 
         if (!_agent.isOnNavMesh)
@@ -337,6 +481,16 @@ public class AIFollower : MonoBehaviour
             animator.SetBool(AnimGrounded, true);
             animator.SetFloat(AnimMotionSpeed, 1f);
         }
+    }
+
+    private void OnEnable()
+    {
+        Pickup.OnCollectedAt += HandleStarTakenAt;
+    }
+
+    private void OnDisable()
+    {
+        Pickup.OnCollectedAt -= HandleStarTakenAt;
     }
 
     void Update()
@@ -413,6 +567,8 @@ public class AIFollower : MonoBehaviour
         _sightTimer = sightCheckInterval;
 
         _hasSight = CanSeeTarget();
+        // Cached alongside sight rather than tested every frame - it is only ever read from Stare's tick.
+        _watched = IsWatchedByPlayer();
     }
 
     /// <summary>
@@ -428,13 +584,17 @@ public class AIFollower : MonoBehaviour
         if (_hearingTimer > 0f) return;
         _hearingTimer = hearingInterval;
 
-        // Early floors hear less: the same footsteps carry a shorter way
+        // Early floors hear less: the same footsteps carry a shorter way. Lying in wait (F45) hears
+        // further still - the whole point of an ambush is that a sprint gives you away.
         float noiseRadius = _stealth.NoiseRadius;
         if (noiseRadius <= 0.01f) return;
-        if (!CanHear(target.position, noiseRadius * EffectiveHearingScale)) return;
+        float hearingScale = EffectiveHearingScale * (_state == State.Ambush ? ambushHearingBoost : 1f);
+        if (!CanHear(target.position, noiseRadius * hearingScale)) return;
 
         _lastKnownPosition = target.position;
-        if (_state != State.Chase && _state != State.Captured)
+        // Chase and Captured were already excluded; Stare is too - it already has sight of the exact
+        // same player, and its own sight-driven timers own its transitions, not a background noise check.
+        if (_state != State.Chase && _state != State.Captured && _state != State.Stare)
         {
             EnterSearch();
         }
@@ -468,13 +628,38 @@ public class AIFollower : MonoBehaviour
     public bool HearNoise(Vector3 at, float radius)
     {
         if (_agent == null || !_agent.isOnNavMesh || _state == State.Captured) return false;
+
+        // Unconditional, not gated by hearing: TensionDirector's own Pickup.OnCollectedAt subscription
+        // (added earlier, in MazeGenerator.Awake) calls this for the very same position before this
+        // component's own HandleStarTakenAt runs (AIFollower is a pre-existing scene object with the
+        // default, later execution order), so an ambush cell too quiet to "hear" the pickup would
+        // otherwise never notice its star being taken.
+        if (TryEndAmbushForStar(at)) return true;
+
         if (!CanHear(at, radius * EffectiveHearingScale)) return false;
 
         _lastKnownPosition = at;
-        if (_state != State.Chase)
+        if (_state != State.Chase && _state != State.Stare)
         {
             EnterSearch();
         }
+        return true;
+    }
+
+    /// <summary>
+    /// NavMesh path length between two points, snapping both onto the mesh first - CalculatePath fails
+    /// outright when a point is a fraction off it, which a star 1 m above the floor or a cell centre
+    /// beside a locker both can be. Shared by the F44 vantage search and the F45 ambush picks.
+    /// </summary>
+    private bool TryPathLength(Vector3 from, Vector3 to, out float length)
+    {
+        length = 0f;
+        if (!NavMesh.SamplePosition(from, out NavMeshHit fromHit, navMeshSearchRadius, NavMesh.AllAreas)) return false;
+        if (!NavMesh.SamplePosition(to, out NavMeshHit toHit, navMeshSearchRadius, NavMesh.AllAreas)) return false;
+        if (!NavMesh.CalculatePath(fromHit.position, toHit.position, NavMesh.AllAreas, _hearingPath)) return false;
+        if (_hearingPath.status != NavMeshPathStatus.PathComplete) return false;
+
+        length = PathLength(_hearingPath);
         return true;
     }
 
@@ -517,11 +702,24 @@ public class AIFollower : MonoBehaviour
             return false;
         }
 
-        // The maze walls sit on the same layer as the player, so the blocker is identified by its
-        // hierarchy rather than by a layer mask.
-        Vector3 ray = chest - eye;
+        return HasLineOfSight(eye, chest);
+    }
+
+    /// <summary>
+    /// The raycast half of CanSeeTarget, factored out so F44's vantage search (from a candidate point,
+    /// not from the follower's own current position) can reuse it. The maze walls sit on the same layer
+    /// as the player, so the blocker is identified by its hierarchy rather than by a layer mask.
+    /// </summary>
+    private bool HasLineOfSight(Vector3 from, Vector3 to)
+    {
+        Vector3 ray = to - from;
         float distance = ray.magnitude;
-        int count = Physics.RaycastNonAlloc(eye, ray / distance, _sightHits, distance, ~0, QueryTriggerInteraction.Ignore);
+        if (distance < 0.0001f)
+        {
+            return true;
+        }
+
+        int count = Physics.RaycastNonAlloc(from, ray / distance, _sightHits, distance, ~0, QueryTriggerInteraction.Ignore);
 
         float closest = float.MaxValue;
         Transform blocker = null;
@@ -542,6 +740,39 @@ public class AIFollower : MonoBehaviour
         }
 
         return blocker == null || IsPartOf(blocker, target);
+    }
+
+    /// <summary>
+    /// F44: is the player's camera actually looking at the hunter right now? Inside the viewport (with
+    /// a margin, so the freeze does not twitch at the screen edge), in front of the camera, and not
+    /// blocked by anything outside the hunter's or the player's own hierarchy.
+    /// </summary>
+    private bool IsWatchedByPlayer()
+    {
+        if (_camera == null || target == null) return false;
+
+        Vector3 eye = transform.position + Vector3.up * eyeHeight;
+        Vector3 viewport = _camera.WorldToViewportPoint(eye);
+        float m = watchedViewportMargin;
+        if (viewport.z <= 0f || viewport.x < m || viewport.x > 1f - m || viewport.y < m || viewport.y > 1f - m)
+        {
+            return false;
+        }
+
+        Vector3 camPos = _camera.transform.position;
+        Vector3 ray = eye - camPos;
+        float distance = ray.magnitude;
+        if (distance < 0.0001f) return true;
+
+        int count = Physics.RaycastNonAlloc(camPos, ray / distance, _sightHits, distance, ~0, QueryTriggerInteraction.Ignore);
+        for (int i = 0; i < count; i++)
+        {
+            Transform hit = _sightHits[i].transform;
+            if (IsPartOf(hit, transform) || IsPartOf(hit, target)) continue;
+            if (_sightHits[i].distance < distance - 0.1f) return false;
+        }
+
+        return true;
     }
 
     private static bool IsPartOf(Transform candidate, Transform root)
@@ -569,26 +800,54 @@ public class AIFollower : MonoBehaviour
             return;
         }
 
+        // Captured above; from here on _state might still change this frame (a bust, a sighting, a
+        // lost stare), so the incoming state has to be captured now for the ChaseStateChanged check
+        // at the bottom to see the real before/after, including a bust that jumps Stare straight to Chase.
+        State previous = _state;
+
         // "It saw you go in" - the last _hasSight reading before Hidden flips true is still valid,
-        // because UpdatePerception ran earlier this same frame.
+        // because UpdatePerception ran earlier this same frame. A stare that watched the player climb
+        // in busts it exactly like a chase does.
         bool hiddenNow = _stealth != null && _stealth.Hidden;
-        if (hiddenNow && !_wasHidden && _state == State.Chase && _hasSight) _bustingHidingSpot = true;
+        if (hiddenNow && !_wasHidden && (_state == State.Chase || _state == State.Stare) && _hasSight)
+        {
+            if (_state == State.Stare) LeaveStare();
+            _bustingHidingSpot = true;
+            _state = State.Chase;
+        }
         if (!hiddenNow) _bustingHidingSpot = false;
         _wasHidden = hiddenNow;
 
-        State previous = _state;
-
         if (_hasSight)
         {
-            _state = State.Chase;
             _lostSightTimer = EffectiveLoseSightTime;
             _lastKnownPosition = target.position;
+
+            if (_state != State.Chase && _state != State.Stare)
+            {
+                if (_state == State.Ambush) LeaveAmbush();
+
+                // Below the stare ceiling and far enough out, it runs to a vantage point and watches
+                // instead of closing immediately; otherwise (high threat, or already close) it chases
+                // exactly as before F44 existed.
+                bool stare = _threat < stareCeiling && FlatDistanceToTarget > EffectiveStareBreakDistance;
+                if (stare) EnterStare(); else _state = State.Chase;
+            }
         }
         else if (_state == State.Chase && !_bustingHidingSpot)
         {
             _lostSightTimer -= Time.deltaTime;
             if (_lostSightTimer <= 0f)
             {
+                EnterSearch();
+            }
+        }
+        else if (_state == State.Stare)
+        {
+            _lostSightTimer -= Time.deltaTime;
+            if (_lostSightTimer <= 0f)
+            {
+                LeaveStare();
                 EnterSearch();
             }
         }
@@ -605,6 +864,12 @@ public class AIFollower : MonoBehaviour
                 break;
             case State.Search:
                 TickSearch();
+                break;
+            case State.Stare:
+                TickStare();
+                break;
+            case State.Ambush:
+                TickAmbush();
                 break;
             default:
                 TickWander();
@@ -676,6 +941,10 @@ public class AIFollower : MonoBehaviour
     /// </summary>
     private void EnterSearch()
     {
+        // Idempotent: harmless if this runs a second time for the same ambush (TryEndAmbushForStar
+        // already left it explicitly before calling here).
+        if (_state == State.Ambush) LeaveAmbush();
+
         _state = State.Search;
         _searchBudgetTimer = EffectiveSearchBudget;
         _searchDwellTimer = 0f;
@@ -798,6 +1067,13 @@ public class AIFollower : MonoBehaviour
             return;
         }
 
+        // F45: try an ambush before the hunch roll - a wander leg becomes lying in wait near the star
+        // the player is heading for, instead of another lap of the maze.
+        if (_maze != null && _patrolTargets != null && Random.value < EffectiveAmbushBias && TryEnterAmbush())
+        {
+            return;
+        }
+
         // Hunch first (escalates with threat, reads as "it knows roughly where you are"), then the
         // patrol preference for a live star, then genuinely random. A hard preference on either would
         // make it camp, which is unfair rather than tense.
@@ -830,6 +1106,286 @@ public class AIFollower : MonoBehaviour
         // Give the path a moment to be computed before the arrival test runs again
         _wanderRepickCooldown = 0.25f;
         SetDestinationNear(_wanderPoints[next]);
+    }
+
+    // ---------------------------------------------------------------- F44: the stare
+
+    /// <summary>
+    /// A sighting below the stare ceiling, outside the break distance: the hunter rushes to a vantage
+    /// point and watches instead of closing immediately. The rush is the one fast moment before the
+    /// hatch opens - a deliberate, bounded exception to the walk-pace rule in ChaseSpeed() - and it can
+    /// never end in a capture: the vantage point is always farther than the break distance, and TickStare
+    /// only ever ends the rush by arriving, timing out, or already being inside that distance.
+    /// </summary>
+    private void EnterStare()
+    {
+        _state = State.Stare;
+        _stareTimer = 0f;
+        _rushing = false;
+        _hasVantage = false;
+        _agent.stoppingDistance = wanderStoppingDistance;
+        _agent.isStopped = false;
+
+        if (TryChooseVantage(out _vantage))
+        {
+            _hasVantage = true;
+            _rushing = true;
+            _rushTimer = 0f;
+            SetDestinationNear(_vantage);
+        }
+
+        _presence?.SetFaceMode(AIPresence.FaceMode.Watching);
+        // Held for the whole possible stare plus a margin - LeaveStare cuts this short whichever way
+        // the stare actually ends.
+        _presence?.Hold(EffectiveStareCommitSeconds + 1f);
+        StareStateChanged?.Invoke(true);
+    }
+
+    /// <summary>
+    /// Looks for a corner or junction cell at roughly stareDistance from the player, with sight of them,
+    /// reachable within rushMaxPathLength. Candidates are the same cell centres used for wandering, so
+    /// no extra bookkeeping is needed. Returns false (stare from where it stands - it already has sight)
+    /// if nothing qualifies.
+    /// </summary>
+    private bool TryChooseVantage(out Vector3 point)
+    {
+        point = transform.position;
+        bool found = false;
+        float bestScore = float.NegativeInfinity;
+
+        for (int i = 0; i < _wanderPoints.Count; i++)
+        {
+            Vector3 candidate = _wanderPoints[i];
+            float flatDistance = FlatDirection(candidate - target.position).magnitude;
+            if (Mathf.Abs(flatDistance - stareDistance) > stareDistanceTolerance) continue;
+            // Never a vantage inside the break ring - it would become a chase the instant it arrived.
+            if (flatDistance <= EffectiveStareBreakDistance + 0.5f) continue;
+
+            if (!HasLineOfSight(candidate + Vector3.up * eyeHeight, target.position + Vector3.up * targetHeight)) continue;
+            if (!TryPathLength(transform.position, candidate, out float pathLength)) continue;
+            if (pathLength > rushMaxPathLength) continue;
+
+            float score = (_maze != null && _maze.IsCornerCell(candidate) ? 2f : 0f)
+                - Mathf.Abs(flatDistance - stareDistance) * 0.3f
+                - pathLength * 0.05f;
+
+            if (score > bestScore)
+            {
+                bestScore = score;
+                point = candidate;
+                found = true;
+            }
+        }
+
+        return found;
+    }
+
+    private void TickStare()
+    {
+        _stareTimer += Time.deltaTime;
+        UpdateRotation(FlatDirection(target.position - transform.position));
+
+        // 1. The rush - it runs at you whether or not you are looking. That is the scare, and the
+        // watched freeze only applies once it is standing at the vantage point.
+        if (_rushing)
+        {
+            _rushTimer += Time.deltaTime;
+            _agent.isStopped = false;
+            MoveSpeedTowards(rushSpeed);
+
+            if (ReachedDestination() || _rushTimer >= rushMaxSeconds || FlatDistanceToTarget <= EffectiveStareBreakDistance + 0.5f)
+            {
+                // Arrived, ran out of rush, or got close enough on the way there: stand and watch.
+                _rushing = false;
+            }
+            return;
+        }
+
+        // 2. The watch. Strict freeze early (floors 1-2 read as dead still), soft freeze later (a
+        // creep even under the player's gaze).
+        float scale = _watched ? EffectiveStareWatchedSpeedScale : 1f;
+        if (scale <= 0.001f)
+        {
+            _agent.isStopped = true;
+            _agent.velocity = Vector3.zero;
+        }
+        else
+        {
+            _agent.isStopped = false;
+            MoveSpeedTowards(WanderSpeed() * scale);
+            _repathTimer -= Time.deltaTime;
+            if (_repathTimer <= 0f)
+            {
+                _repathTimer = repathInterval;
+                SetDestinationNear(target.position);
+            }
+        }
+
+        // 3. The break: close enough, or watched long enough, and the stare is over.
+        if (FlatDistanceToTarget <= EffectiveStareBreakDistance || _stareTimer >= EffectiveStareCommitSeconds)
+        {
+            LeaveStare();
+            _state = State.Chase;
+            // Fired explicitly: this transition happens inside a tick, after this frame's
+            // previous != _state check already ran, so the state-machine's own check never sees it.
+            ChaseStateChanged?.Invoke(true);
+        }
+    }
+
+    /// <summary>
+    /// Called from every stare exit (lost sight, the break, a locker bust, RelocateTo's Stare refusal
+    /// never gets here since it refuses before touching state) before _state is overwritten.
+    /// </summary>
+    private void LeaveStare()
+    {
+        _rushing = false;
+        _hasVantage = false;
+        _agent.isStopped = false;
+        _presence?.SetFaceMode(AIPresence.FaceMode.Normal);
+        _presence?.ReleaseHold();
+        StareStateChanged?.Invoke(false);
+    }
+
+    // ---------------------------------------------------------------- F45: the ambush
+
+    /// <summary>
+    /// Works out which live star the player will reach first (shortest NavMesh path from the player,
+    /// among stars not on cooldown that have at least one ambush cell), then heads for the ambush cell
+    /// nearest the hunter itself - never one the player is standing in or right next to.
+    /// </summary>
+    private bool TryEnterAmbush()
+    {
+        int bestStarIndex = -1;
+        float bestStarLength = float.MaxValue;
+        Vector3 bestStarPosition = default;
+
+        for (int i = 0; i < _patrolTargets.Count; i++)
+        {
+            Transform star = _patrolTargets[i];
+            if (star == null) continue;
+            if (_ambushCooldownUntil.TryGetValue(i, out float until) && until > Time.time) continue;
+            if (_maze.AmbushCellsFor(i).Count == 0) continue;
+            if (!TryPathLength(target.position, star.position, out float length)) continue;
+
+            if (length < bestStarLength)
+            {
+                bestStarLength = length;
+                bestStarIndex = i;
+                bestStarPosition = star.position;
+            }
+        }
+
+        if (bestStarIndex < 0) return false;
+
+        IReadOnlyList<Vector3> cells = _maze.AmbushCellsFor(bestStarIndex);
+        Vector3 chosenCell = default;
+        bool haveCell = false;
+        float bestCellLength = float.MaxValue;
+
+        for (int i = 0; i < cells.Count; i++)
+        {
+            Vector3 cell = cells[i];
+            // Roughly one cell width - never camp on or right beside the player.
+            if (FlatDirection(cell - target.position).magnitude <= ambushPlayerExclusionRadius) continue;
+            if (!TryPathLength(transform.position, cell, out float length)) continue;
+
+            if (length < bestCellLength)
+            {
+                bestCellLength = length;
+                chosenCell = cell;
+                haveCell = true;
+            }
+        }
+
+        if (!haveCell) return false;
+
+        _ambushStarIndex = bestStarIndex;
+        _ambushStarPosition = bestStarPosition;
+        _ambushArrived = false;
+        _ambushWaitTimer = 0f;
+        _state = State.Ambush;
+        _agent.isStopped = false;
+        _agent.stoppingDistance = wanderStoppingDistance;
+        SetDestinationNear(chosenCell);
+        AmbushStateChanged?.Invoke(true);
+        return true;
+    }
+
+    private void TickAmbush()
+    {
+        if (!_ambushArrived)
+        {
+            // moveSpeed, not WanderSpeed(): dormantSpeed exists to read as barely stirring before the
+            // first star, and an ambusher that takes twenty seconds to arrive never gets there in time.
+            MoveSpeedTowards(moveSpeed);
+            UpdateRotation(CurrentHeading());
+
+            if (ReachedDestination())
+            {
+                _ambushArrived = true;
+                _agent.isStopped = true;
+                _agent.velocity = Vector3.zero;
+                _presence?.Hold(EffectiveAmbushWait + 1f);
+                _presence?.SetFaceMode(AIPresence.FaceMode.Lurking);
+            }
+            return;
+        }
+
+        _ambushWaitTimer += Time.deltaTime;
+        // Faces the star, around the corner - not the player, who it cannot see from here.
+        UpdateRotation(FlatDirection(_ambushStarPosition - transform.position));
+
+        if (_ambushWaitTimer >= EffectiveAmbushWait)
+        {
+            LeaveAmbush();
+            _state = State.Wander;
+            _wanderRepickCooldown = 0f;
+        }
+    }
+
+    /// <summary>
+    /// Ends the current ambush and starts its repeat cooldown. Idempotent (a no-op once already left):
+    /// TryEndAmbushForStar leaves explicitly before calling EnterSearch, and EnterSearch's own guard
+    /// would otherwise call this a second time for the same ambush.
+    /// </summary>
+    private void LeaveAmbush(bool endedOnPickup = false)
+    {
+        if (_ambushStarIndex < 0) return;
+
+        _ambushCooldownUntil[_ambushStarIndex] = Time.time + ambushRepeatCooldown;
+        _ambushStarIndex = -1;
+        _ambushArrived = false;
+        _agent.isStopped = false;
+        _presence?.SetFaceMode(AIPresence.FaceMode.Normal);
+        _presence?.ReleaseHold();
+        // Set before the event fires: DreadDirector reads both synchronously inside its own handler,
+        // and Pickup.OnCollectedAt's subscription order means that handler can run before this one.
+        LastAmbushEndedOnPickup = endedOnPickup;
+        LastAmbushEndTime = Time.time;
+        AmbushStateChanged?.Invoke(false);
+    }
+
+    /// <summary>
+    /// F45: if the hunter is lying in wait for the star at `at`, the ambush ends right here -
+    /// unconditionally, not gated by hearing. Called from both HearNoise (TensionDirector's own
+    /// Pickup.OnCollectedAt subscription, for the general "a star was taken" noise) and this component's
+    /// own HandleStarTakenAt, so the ambush always notices its star being taken even from a cell too
+    /// quiet to have heard the pickup.
+    /// </summary>
+    private bool TryEndAmbushForStar(Vector3 at)
+    {
+        if (_state != State.Ambush) return false;
+        if (Vector3.Distance(at, _ambushStarPosition) > ambushStarMatchRadius) return false;
+
+        _lastKnownPosition = at;
+        LeaveAmbush(true);
+        EnterSearch();
+        return true;
+    }
+
+    private void HandleStarTakenAt(Vector3 at)
+    {
+        TryEndAmbushForStar(at);
     }
 
     private bool ReachedDestination()
@@ -939,7 +1495,9 @@ public class AIFollower : MonoBehaviour
     /// </summary>
     public bool RelocateTo(Vector3 position, Vector3 towards)
     {
-        if (_agent == null || _state == State.Captured || _state == State.Chase) return false;
+        // Stare refuses exactly like Chase: it is already a reaction to seeing the player, and a
+        // relocation mid-stare would be the same teleporting-predator tell this rule exists to avoid.
+        if (_agent == null || _state == State.Captured || _state == State.Chase || _state == State.Stare) return false;
         if (!NavMesh.SamplePosition(position, out NavMeshHit hit, 1.5f, NavMesh.AllAreas)) return false;
         if (!_agent.Warp(hit.position)) return false;
 
@@ -977,6 +1535,11 @@ public class AIFollower : MonoBehaviour
         _stunnedUntil = Time.time + stunSeconds;
         _agent.isStopped = true;
         _agent.velocity = Vector3.zero;
+        // Defensive: Stare/Ambush bookkeeping is already cleared before any transition into Chase (the
+        // only route into Captured), so this is normally a no-op - but a stale face or hum hold surviving
+        // a capture would be a silent bug, so it is reset here too.
+        _presence?.SetFaceMode(AIPresence.FaceMode.Normal);
+        _presence?.ReleaseHold();
         ChaseStateChanged?.Invoke(false);
         return true;
     }
@@ -1078,7 +1641,21 @@ public class AIFollower : MonoBehaviour
         Gizmos.DrawRay(eye, Quaternion.Euler(0f, viewAngle * 0.5f, 0f) * facing * viewDistance);
         Gizmos.DrawRay(eye, facing * viewDistance);
 
-        Gizmos.color = _state == State.Captured ? Color.red : new Color(1f, 0.5f, 0f, 0.8f);
+        switch (_state)
+        {
+            case State.Captured:
+                Gizmos.color = Color.red;
+                break;
+            case State.Stare:
+                Gizmos.color = new Color(1f, 0f, 0.4f, 0.9f);
+                break;
+            case State.Ambush:
+                Gizmos.color = new Color(0.5f, 0f, 0.6f, 0.7f);
+                break;
+            default:
+                Gizmos.color = new Color(1f, 0.5f, 0f, 0.8f);
+                break;
+        }
         Vector3 feet = transform.position + Vector3.up * 0.05f;
         Vector3 previousPoint = feet + Vector3.right * captureRadius;
         for (int i = 1; i <= 32; i++)
