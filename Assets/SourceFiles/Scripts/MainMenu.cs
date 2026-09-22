@@ -138,12 +138,23 @@ public class MainMenu : MonoBehaviour
         RuntimeUi.Place(sub.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -290f), new Vector2(1200f, 60f));
 
         Button start = RuntimeUi.CreateButton(_titleScreen.transform, "START GAME",
-            new Vector2(0f, 250f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
+            new Vector2(0f, 300f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
         start.onClick.AddListener(ShowRules);
 
+        // F48: builds one floor out of the Maze Modular Puzzle Kit instead of the FloorThemes gallery.
+        // A test button - it skips the rules screen and drops straight into the run.
+        Button startNewMaze = RuntimeUi.CreateButton(_titleScreen.transform, "START NEW MAZE",
+            new Vector2(0f, 190f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
+        startNewMaze.onClick.AddListener(StartKitMaze);
+
         Button exit = RuntimeUi.CreateButton(_titleScreen.transform, "EXIT",
-            new Vector2(0f, 140f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
+            new Vector2(0f, 80f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
         exit.onClick.AddListener(GameFlow.Quit);
+    }
+
+    private void StartKitMaze()
+    {
+        GameFlow.StartKitMaze();
     }
 
     private void BuildRulesScreen(Transform canvas)

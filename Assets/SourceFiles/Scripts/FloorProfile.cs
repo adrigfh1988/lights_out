@@ -3,23 +3,61 @@ using UnityEngine;
 /// <summary>
 /// Every number that makes a floor harder, in one place. Difficulty here is not Easy/Medium/Hard, it
 /// is how far into the game the player is: floor 1 is a gentle walk in a small, lit maze, and the
-/// final floor keeps the pre-floors gameplay tuning for the hunter's speed, senses and timers; its look
-/// comes from theme 5, and the ambush bias (F45) is new behaviour on every floor, floor 5 included.
+/// final floor keeps the pre-floors gameplay tuning for the hunter's speed, senses and timers. Its look
+/// is a separate concern, assigned by <see cref="FloorThemes"/> below, and the ambush bias (F45) is new
+/// behaviour on every floor, floor 5 included.
 ///
-/// Each value is a pair, "first floor" and "final floor", blended by <see cref="Blend"/>. To make the
-/// early game kinder or the late game crueller, change the pair - nothing else needs to know.
+/// Each gameplay value is a pair, "first floor" and "final floor", blended by <see cref="Blend"/>. To make
+/// the early game kinder or the late game crueller, change the pair - nothing else needs to know.
 /// Plain data, no MonoBehaviour and no statics: MazeGenerator builds one and hands it out.
 /// </summary>
 public class FloorProfile
 {
     public const int FinalFloor = 5;
 
+    /// <summary>
+    /// Names the theme numbers <see cref="FloorThemes"/> assigns from - one row per "type of floor",
+    /// matching a row built by LIGHTS OUT &gt; Build Floor Themes (<c>Assets/Editor/FloorThemeBuilder.cs</c>,
+    /// its <c>rowNames</c> array). Add a new type here (and a matching builder/row) to grow the list;
+    /// nothing else needs to change.
+    /// </summary>
+    public static class Theme
+    {
+        public const int Ward = 1;
+        public const int BoilerDeck = 2;
+        public const int Crypt = 3;
+        public const int Lab = 4;
+        public const int Hollow = 5;
+    }
+
+    /// <summary>
+    /// Floor -&gt; theme number, one entry per floor (index 0 is floor 1). A floor's theme does not have
+    /// to match its own number: reassign an entry to give that floor a different type's look - e.g.
+    /// <c>FloorThemes[0] = Theme.Hollow</c> gives floor 1 the Hollow's aesthetic. Adding a floor to the
+    /// game means adding an entry here (and bumping <see cref="FinalFloor"/> and the gallery row count).
+    /// </summary>
+    private static readonly int[] FloorThemes =
+    {
+        Theme.Ward,       // floor 1
+        Theme.BoilerDeck, // floor 2
+        Theme.Crypt,      // floor 3
+        Theme.Lab,        // floor 4
+        Theme.Crypt,      // floor 5 - borrowed: the Hollow's purple runes read murky, not scary, and swallowed the flashlight
+    };
+
+    /// <summary>Theme number for a 1-based floor, from <see cref="FloorThemes"/>. Falls back to the floor's own number if the list doesn't cover it.</summary>
+    private static int ThemeFor(int floor)
+    {
+        int index = floor - 1;
+        return index >= 0 && index < FloorThemes.Length ? FloorThemes[index] : floor;
+    }
+
     public int Floor { get; private set; }
 
     /// <summary>0 on the first floor, 1 on the final one.</summary>
     public float Progress { get; private set; }
 
-    /// <summary>Which FloorThemeSet row the maze clones. The themes' looks are authored in the scene; this is only the floor-to-theme mapping.</summary>
+    /// <summary>Which FloorThemeSet row the maze clones. Set from <see cref="FloorThemes"/> in For() - the themes' looks are authored in the scene; this is only the floor-to-theme mapping.</summary>
     public int ThemeIndex;
 
     // ---- world
@@ -74,7 +112,7 @@ public class FloorProfile
         floor = Mathf.Clamp(floor, 1, FinalFloor);
         float t = FinalFloor > 1 ? (floor - 1) / (float)(FinalFloor - 1) : 1f;
 
-        FloorProfile p = new FloorProfile { Floor = floor, Progress = t, ThemeIndex = floor };
+        FloorProfile p = new FloorProfile { Floor = floor, Progress = t, ThemeIndex = ThemeFor(floor) };
 
         // Pairs are (first floor, final floor). The final-floor values are the shipped tuning, except the
         // stare/ambush block below, which is new on every floor.

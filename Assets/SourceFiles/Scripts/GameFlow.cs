@@ -28,11 +28,25 @@ public static class GameFlow
     /// </summary>
     public static bool IsInShop;
 
+    /// <summary>
+    /// F48: build the next maze from the Maze Modular Puzzle Kit instead of the FloorThemes gallery.
+    /// Lasts the campaign - set once by START NEW MAZE, cleared only by ReturnToMenu (and the
+    /// SubsystemRegistration reset). Read by MazeGenerator.ResolveKitTheme in Awake.
+    /// </summary>
+    public static bool UseKitMaze;
+
     public static void Restart(bool sameMaze, int currentSeed)
     {
         SkipMenuOnLoad = true;
         PendingSeed = sameMaze ? currentSeed : 0;
         Reload();
+    }
+
+    /// <summary>F48: the title screen's "START NEW MAZE" button. Sets the kit-maze flag for the whole campaign, then reloads straight into the run (SkipMenuOnLoad, no rules screen - this is a test button).</summary>
+    public static void StartKitMaze()
+    {
+        UseKitMaze = true;
+        Restart(false, 0);
     }
 
     /// <summary>Go up one floor with a fresh maze. Callers only offer this below the final floor.</summary>
@@ -48,6 +62,7 @@ public static class GameFlow
         SkipMenuOnLoad = false;
         CurrentFloor = 1;
         PendingSeed = 0;
+        UseKitMaze = false;
         PlayerWallet.ResetCampaign();
         PlayerInventory.ResetCampaign();
         DreadDirector.ResetCampaign();
@@ -85,5 +100,6 @@ public static class GameFlow
         IsRunActive = false;
         CurrentFloor = 1;
         IsInShop = false;
+        UseKitMaze = false;
     }
 }

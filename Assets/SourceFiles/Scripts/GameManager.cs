@@ -22,7 +22,7 @@ public class GameManager : MonoBehaviour
     void Start()
     {
         // Count all coins currently present in the scene
-        _remainingCoins = FindObjectsByType<Pickup>(FindObjectsSortMode.None).Length;
+        _remainingCoins = FindObjectsByType<Pickup>(FindObjectsInactive.Exclude).Length;
         _totalCoins = _remainingCoins;
 
         // Subscribe to coin collection notifications

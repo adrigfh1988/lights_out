@@ -159,6 +159,8 @@ At Play, each floor **clones the scene instances** of its theme row (so unapplie
 
 A third editor tool, `LIGHTS OUT ▸ Build Hunter Body`, swaps the placeholder robot for the Adam character as the hunter.
 
+The title screen has a second button, **START NEW MAZE**, that builds one floor out of the imported *Maze Modular Puzzle Kit* instead of the FloorThemes gallery (test feature, `GameFlow.UseKitMaze`; prefab references live on a `KitMazeTheme` scene object built by `LIGHTS OUT ▸ Build Kit Maze Theme`). It skips the rules screen and lasts the whole campaign until you return to the main menu.
+
 ### Systems at a glance
 
 | Layer | Components |
