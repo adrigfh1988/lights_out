@@ -187,20 +187,6 @@ public class MazeGenerator : MonoBehaviour
         return _ambushCells[starIndex];
     }
 
-    /// <summary>A junction or corner cell (not a straight run, not a dead end): where something would stand to peek. False for a point outside the maze grid.</summary>
-    public bool IsCornerCell(Vector3 cellCenter)
-    {
-        int x = Mathf.FloorToInt((cellCenter.x - origin.x) / cellSize);
-        int z = Mathf.FloorToInt((cellCenter.z - origin.z) / cellSize);
-        if (x < 0 || x >= width || z < 0 || z >= height) return false;
-
-        if (WallCount(x, z) > 2) return false;
-
-        bool northSouth = _wallN[x, z] && _wallS[x, z] && !_wallE[x, z] && !_wallW[x, z];
-        bool eastWest = _wallE[x, z] && _wallW[x, z] && !_wallN[x, z] && !_wallS[x, z];
-        return !northSouth && !eastWest;
-    }
-
     private void Awake()
     {
         if (width < 2 || height < 2)

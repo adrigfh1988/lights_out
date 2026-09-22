@@ -175,7 +175,6 @@ public class HorrorAudioDirector : MonoBehaviour
         if (_follower != null)
         {
             _follower.ChaseStateChanged += HandleChaseStateChanged;
-            _follower.StareStateChanged += HandleStareStateChanged;
         }
     }
 
@@ -187,8 +186,6 @@ public class HorrorAudioDirector : MonoBehaviour
         {
             _follower.ChaseStateChanged -= HandleChaseStateChanged;
             _follower.ChaseStateChanged += HandleChaseStateChanged;
-            _follower.StareStateChanged -= HandleStareStateChanged;
-            _follower.StareStateChanged += HandleStareStateChanged;
         }
 
         if (droneClip != null)
@@ -208,7 +205,6 @@ public class HorrorAudioDirector : MonoBehaviour
         if (_follower != null)
         {
             _follower.ChaseStateChanged -= HandleChaseStateChanged;
-            _follower.StareStateChanged -= HandleStareStateChanged;
         }
     }
 
@@ -254,24 +250,6 @@ public class HorrorAudioDirector : MonoBehaviour
         // The clip may well be a long ambience loop rather than a stinger, so bound it rather than
         // trusting its length.
         _sting.SetScheduledEndTime(AudioSettings.dspTime + stingDuration);
-    }
-
-    /// <summary>F44: a stare beginning is a warning, not the full chase sting - the same clip, quieter, lower and shorter. The break to a real chase still gets the full HandleChaseStateChanged sting.</summary>
-    private void HandleStareStateChanged(bool staring)
-    {
-        if (staring) PlaySeenCue();
-    }
-
-    /// <summary>The low "it sees you" cue that opens a stare.</summary>
-    public void PlaySeenCue()
-    {
-        if (stingClip == null || _sting == null) return;
-
-        _sting.clip = stingClip;
-        _sting.pitch = 0.32f;
-        _sting.volume = 0.45f;
-        _sting.Play();
-        _sting.SetScheduledEndTime(AudioSettings.dspTime + 1.1f);
     }
 
     /// <summary>The sting for being caught: louder and lower than the chase one, with the bed cut out under it.</summary>

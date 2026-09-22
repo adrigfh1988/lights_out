@@ -42,7 +42,7 @@ There are five floors. Each one is bigger, darker and meaner than the last.
 |---|---|---|
 | Move | `W` `A` `S` `D` | Left stick |
 | Look | Mouse | Right stick |
-| Sprint | `Shift` | Stick sprint |
+| Sprint | `Shift` | Left trigger |
 | Flashlight | `F` | — |
 | Hide in a locker / talk / leave the shop | `E` | West button (X / Square) |
 | Use spare battery | `1` | D-pad left |
@@ -67,12 +67,12 @@ Difficulty isn't Easy / Medium / Hard. It's *how far in you are*. Every number b
 | Floor | Look | Maze | Stars | Lockers | Hunter walks / runs | Sees to | Hatch timer |
 |:-:|---|:-:|:-:|:-:|:-:|:-:|:-:|
 | 1 | **The Ward** | 7 × 7 | 2 | 5 | 1.6 / 1.8 m/s | 9 m | 120 s |
-| 2 | **Boiler Deck** | 8 × 8 | 3 | 6 | ~2.1 / ~2.4 m/s | ~11 m | ~105 s |
-| 3 | **The Crypt** | 9 × 9 | 4 | 8 | ~2.6 / ~3.2 m/s | ~14 m | 90 s |
-| 4 | **The Lab** | 10 × 10 | 4 | 9 | ~3.1 / ~3.9 m/s | ~16 m | ~75 s |
+| 2 | **Boiler Deck** | 8 × 8 | 3 | 6 | 2.1 / 2.5 m/s | 11 m | 105 s |
+| 3 | **The Crypt** | 9 × 9 | 4 | 8 | 2.6 / 3.2 m/s | 14 m | 90 s |
+| 4 | **The Lab** | 10 × 10 | 4 | 9 | 3.0 / 3.8 m/s | 16 m | 75 s |
 | 5 | **The Hollow** | 11 × 11 | 5 | 10 | 3.5 / 4.5 m/s | 18 m | 60 s |
 
-Floors 2–4 are interpolated, so the table's `~` values are approximate; `FloorProfile.For(floor)` is authoritative. For reference, you walk at 2.0 m/s.
+Floors 2–4 are linear blends of floor 1 and floor 5 (rounded here); `FloorProfile.For(floor)` is authoritative. For reference, you walk at 2.0 m/s.
 
 Each floor also has its own wall, floor and ceiling pieces, pillars, lamp fixtures, lockers and set-dressing props, so they read as different places rather than a tint change.
 
@@ -85,11 +85,11 @@ The hunter is a small state machine with escalating behaviour:
 | **Wander** | Patrols, biased toward stars you haven't collected yet. |
 | **Chase** | Has sight of you. The only state in which it can capture you. |
 | **Search** | Lost you. Sweeps your last known position. |
-| **Stare** | *Early floors.* On sighting you it rushes to a vantage point and watches, red-faced, advancing only while you look away. It breaks into a chase if you get too close or it waits too long. |
+| **Stare** | *Floors below the last.* On sighting you it rushes to a vantage point and watches, red-faced, advancing only while you look away. It breaks into a chase if you get too close or it waits too long. |
 | **Ambush** | Waits two cells around a corner from the star you're heading for. Ended by you taking the star, by sight, by a heard noise, or by a timeout. |
 | **Captured** | You lost. The camera eases onto its eyes and the torch dies. |
 
-Floor 1's hunter stares far more than it chases. By floor 5, sight is simply a chase.
+The stare/ambush mix is tuned per floor: early floors lean on staring and short ambushes, while on floor 5 sight is simply a chase and ambushes last longest.
 
 ## The shop
 

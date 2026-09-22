@@ -184,8 +184,6 @@ public class PhantomDirector : MonoBehaviour
         if (_maze == null || _player == null || _follower == null) return false;
         if (BailedOut()) return false;
         if (_follower.IsChasing) return false;
-        // F44: a stare is already the real thing - a phantom firing during one would undercut it.
-        if (_follower.IsStaring) return false;
         if (_follower.FlatDistanceToTarget <= hunterExclusionDistance) return false;
         if (_stealth != null && _stealth.Hidden) return false;
         if (Time.time - _lastPhantomTime < minSpacing) return false;

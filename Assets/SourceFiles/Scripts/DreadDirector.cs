@@ -172,14 +172,12 @@ public class DreadDirector : MonoBehaviour
         if (_follower != null)
         {
             _follower.ChaseStateChanged -= HandleChaseStateChanged;
-            _follower.StareStateChanged -= HandleStareStateChanged;
             _follower.AmbushStateChanged -= HandleAmbushStateChanged;
         }
         _follower = follower;
         if (_follower != null)
         {
             _follower.ChaseStateChanged += HandleChaseStateChanged;
-            _follower.StareStateChanged += HandleStareStateChanged;
             _follower.AmbushStateChanged += HandleAmbushStateChanged;
         }
 
@@ -204,7 +202,6 @@ public class DreadDirector : MonoBehaviour
         if (_follower != null)
         {
             _follower.ChaseStateChanged -= HandleChaseStateChanged;
-            _follower.StareStateChanged -= HandleStareStateChanged;
             _follower.AmbushStateChanged -= HandleAmbushStateChanged;
         }
 
@@ -452,9 +449,8 @@ public class DreadDirector : MonoBehaviour
         float progress = Progress;
         if (progress < startProgress || _follower.IsHunting) return false;
         if (_follower.IsChasing || _follower.IsCaptured) return false;
-        // F44/F45: a stare is already a reaction to being seen, and an ambush is a beat of its own -
-        // neither should be interrupted by a relocation telegraph.
-        if (_follower.IsStaring || _follower.IsAmbushing) return false;
+        // F45: an ambush is a beat of its own - it should not be interrupted by a relocation telegraph.
+        if (_follower.IsAmbushing) return false;
         if (Time.time - _lastChaseEndTime < chaseCooldown) return false;
         if (_stealth != null && _stealth.Hidden) return false;
         if (!PlayerMovedRecently()) return false;
@@ -521,11 +517,6 @@ public class DreadDirector : MonoBehaviour
         if (!chasing) _lastChaseEndTime = Time.time;
     }
 
-    /// <summary>F44: a stare ending counts as a chase ending for the relocation cooldown - it was every bit as close a call.</summary>
-    private void HandleStareStateChanged(bool staring)
-    {
-        if (!staring) _lastChaseEndTime = Time.time;
-    }
 
     /// <summary>F45: the first time an ambush ends because its star was actually taken, show the subtitle - once per campaign.</summary>
     private void HandleAmbushStateChanged(bool ambushing)

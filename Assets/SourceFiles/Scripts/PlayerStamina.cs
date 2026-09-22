@@ -2,7 +2,7 @@ using StarterAssets;
 using UnityEngine;
 
 /// <summary>
-/// Sprint is not free. A full bar buys 8 s of sprint; emptying it locks sprint out until the bar
+/// Sprint is not free. A full bar buys 24 s of sprint; emptying it locks sprint out until the bar
 /// climbs back to a quarter, so a held Shift key cannot stutter in and out of sprint at zero.
 /// Added to the player by MazeGenerator.PlacePlayer, next to PlayerStealthState.
 /// </summary>
@@ -10,7 +10,7 @@ using UnityEngine;
 public class PlayerStamina : MonoBehaviour
 {
     [Tooltip("Seconds of continuous sprint from a full bar to empty")]
-    [SerializeField] private float sprintSeconds = 8f;
+    [SerializeField] private float sprintSeconds = 24f;
     [Tooltip("Seconds to refill from empty to full once recovery starts")]
     [SerializeField] private float recoverSeconds = 16f;
     [Tooltip("Pause after releasing sprint before recovery starts")]

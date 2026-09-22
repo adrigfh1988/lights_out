@@ -43,19 +43,13 @@ public class AIPresence : MonoBehaviour
     [SerializeField] private float eyeForward = 0.11f;
     [SerializeField] private float eyeSpacing = 0.055f;
 
-    [Header("Face (F44)")]
-    [Tooltip("Colour and range of the face light built at the eye midpoint while staring")]
-    [SerializeField] private float faceLightIntensity = 2.2f;
-    [SerializeField] private float faceLightRange = 2.5f;
-    [SerializeField] private float watchingEyeScale = 1.6f;
-    [SerializeField] private float watchingEyeEmissionScale = 1.75f;
+    [Header("Face")]
     [SerializeField] private float lurkingEyeEmissionScale = 0.3f;
 
-    /// <summary>The mode the built face (eyes + light) currently reads as.</summary>
+    /// <summary>The mode the built eyes currently read as.</summary>
     public enum FaceMode
     {
         Normal,
-        Watching,
         Lurking
     }
 
@@ -65,7 +59,6 @@ public class AIPresence : MonoBehaviour
     private float _distanceSinceStep;
 
     private Material _eyeMaterial;
-    private Light _faceLight;
     private readonly List<Transform> _eyes = new List<Transform>();
     private FaceMode _faceMode = FaceMode.Normal;
     private float _holdRemaining;
@@ -174,7 +167,7 @@ public class AIPresence : MonoBehaviour
         ApplyFaceMode();
     }
 
-    /// <summary>F44: switches the eyes and the face light between idle, watching (the stare) and lurking (the ambush).</summary>
+    /// <summary>Switches the eyes between idle and lurking (the ambush).</summary>
     public void SetFaceMode(FaceMode mode)
     {
         _faceMode = mode;
@@ -183,35 +176,11 @@ public class AIPresence : MonoBehaviour
 
     private void ApplyFaceMode()
     {
-        float eyeScale = eyeSize;
-        float eyeEmissionScale = 1f;
-        float lightIntensity = 0f;
-
-        switch (_faceMode)
-        {
-            case FaceMode.Watching:
-                eyeScale = eyeSize * watchingEyeScale;
-                eyeEmissionScale = watchingEyeEmissionScale;
-                lightIntensity = faceLightIntensity;
-                break;
-            case FaceMode.Lurking:
-                eyeEmissionScale = lurkingEyeEmissionScale;
-                break;
-        }
+        float eyeEmissionScale = _faceMode == FaceMode.Lurking ? lurkingEyeEmissionScale : 1f;
 
         if (_eyeMaterial != null)
         {
             _eyeMaterial.SetColor("_EmissionColor", eyeColor * eyeEmission * eyeEmissionScale);
-        }
-
-        foreach (Transform eye in _eyes)
-        {
-            if (eye != null) eye.localScale = WorldToLocalScale(eye.parent, eyeScale);
-        }
-
-        if (_faceLight != null)
-        {
-            _faceLight.intensity = lightIntensity;
         }
     }
 
@@ -322,7 +291,7 @@ public class AIPresence : MonoBehaviour
         }
         else
         {
-            Debug.LogWarning("AIPresence: no eye bones and no Head bone found on the model; eyes and the face light are skipped, SetFaceMode will have nothing to drive.", this);
+            Debug.LogWarning("AIPresence: no eye bones and no Head bone found on the model; eyes are skipped, SetFaceMode will have nothing to drive.", this);
             return;
         }
 
@@ -330,10 +299,6 @@ public class AIPresence : MonoBehaviour
         Transform rightEye = BuildEye("RightEye_Glow", rightEyeWorld, rightParent, eyeMaterial);
         _eyes.Add(leftEye);
         _eyes.Add(rightEye);
-
-        Vector3 midpoint = (leftEyeWorld + rightEyeWorld) * 0.5f;
-        Transform lightParent = head != null ? head : (modelAnimator != null ? modelAnimator.transform : transform);
-        BuildFaceLight(midpoint, lightParent);
     }
 
     private Transform BuildEye(string eyeName, Vector3 worldPosition, Transform parent, Material material)
@@ -363,22 +328,6 @@ public class AIPresence : MonoBehaviour
             worldSize / Mathf.Max(0.0001f, Mathf.Abs(lossy.x)),
             worldSize / Mathf.Max(0.0001f, Mathf.Abs(lossy.y)),
             worldSize / Mathf.Max(0.0001f, Mathf.Abs(lossy.z)));
-    }
-
-    /// <summary>F44's red: a child point light at the eye midpoint (it lights the wall beside it, it is not geometry), parented to the head.</summary>
-    private void BuildFaceLight(Vector3 worldMidpoint, Transform parent)
-    {
-        GameObject lightHolder = new GameObject("FaceLight");
-        lightHolder.transform.SetPositionAndRotation(worldMidpoint, parent.rotation);
-        lightHolder.transform.SetParent(parent, true);
-
-        Light light = lightHolder.AddComponent<Light>();
-        light.type = LightType.Point;
-        light.color = eyeColor;
-        light.range = faceLightRange;
-        light.intensity = 0f;
-        light.shadows = LightShadows.None;
-        _faceLight = light;
     }
 
     private static Transform FindDeep(Transform root, string childName)
