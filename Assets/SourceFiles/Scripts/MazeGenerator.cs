@@ -226,6 +226,9 @@ public class MazeGenerator : MonoBehaviour
                 kitCellSize = minKitCellSize;
             }
 
+            // F40 slice A decision 4: kit mode keeps overriding scale on purpose. The profile's
+            // Width/Height still apply (a 10x6 kit maze is fine), but its CellSize/WallHeight are
+            // ignored here in favour of the kit's fixed 3/2/1 m pieces.
             cellSize = Mathf.Max(1, kitCellSize);
             wallThickness = 0.4f;   // kit walls are 0.37
             wallHeight = 3.9f;      // kit walls stand 4 m from kitY = FloorTop - 0.1
@@ -360,11 +363,19 @@ public class MazeGenerator : MonoBehaviour
 
         width = _profile.Width;
         height = _profile.Height;
+        cellSize = _profile.CellSize;
+        wallHeight = _profile.WallHeight;
         starCount = _profile.StarCount;
         lockerCount = _profile.LockerCount;
         cellsPerLamp = _profile.CellsPerLamp;
         lampIntensity = _profile.LampIntensity;
         lampRange = _profile.LampRange;
+
+        // F40 slice A decision 5: lamps scale with wall height so a low ceiling (floor 3) doesn't hide
+        // its lamps in the torch beam and a tall one (floor 4) doesn't leave them looking stranded low.
+        // The serialized lampHeight (2.6) is read here as the 4 m baseline; ApplyFloorProfile runs once
+        // per scene load and only writes this field here, so there is no compounding across floors.
+        lampHeight = Mathf.Clamp(lampHeight * _profile.WallHeight / 4f, 2.3f, 3.4f);
 
         string modifiers = PlayerInventory.ActiveModifiers.Count > 0
             ? string.Join(", ", PlayerInventory.ActiveModifiers)
@@ -949,6 +960,13 @@ public class MazeGenerator : MonoBehaviour
 
                 Vector3 pos = CellCenter(x, z) + Vector3.up * wallHeight;
                 Quaternion rotation = Quaternion.Euler(0f, rng.Next(4) * 90f, 0f);
+
+                // F40 slice A decision 6: a low ceiling (floor 3) can't fit every prop without brushing
+                // the player. Checked after every RNG draw this cell makes (chance, pick, rotation) so
+                // the seed stream is unchanged - a taller floor still gets exactly the props, in exactly
+                // the same rotations, it would have before this guard existed.
+                if (prop.Depth > wallHeight - 2.2f) continue;
+
                 PropPiece clone = Instantiate(prop, pos, rotation, _propsGroup);
                 clone.gameObject.SetActive(true);
                 clone.name = $"Prop_{prop.name}_{x}_{z}";
@@ -1966,8 +1984,11 @@ public class MazeGenerator : MonoBehaviour
             return;
         }
 
-        // Facing the middle of the maze from the corner cell.
-        const float startYaw = 45f;
+        // Facing the middle of the maze from the corner cell - computed so it holds on any rectangle
+        // (F40 slice A decision 7), not just the square grids this used to be a constant 45f for.
+        Vector3 mazeCentre = new Vector3(origin.x + width * cellSize * 0.5f, 0f, origin.z + height * cellSize * 0.5f);
+        Vector3 toCentre = mazeCentre - CellCenter(0, 0);
+        float startYaw = Mathf.Atan2(toCentre.x, toCentre.z) * Mathf.Rad2Deg;
 
         // The CharacterController overwrites transform.position, so it has to be off while teleporting.
         CharacterController controller = player.GetComponent<CharacterController>();

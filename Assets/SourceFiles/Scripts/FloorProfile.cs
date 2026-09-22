@@ -9,11 +9,43 @@ using UnityEngine;
 ///
 /// Each gameplay value is a pair, "first floor" and "final floor", blended by <see cref="Blend"/>. To make
 /// the early game kinder or the late game crueller, change the pair - nothing else needs to know.
+/// The footprint (grid, corridor pitch, wall height) is a per-floor table, not a blend (F40 slice A).
 /// Plain data, no MonoBehaviour and no statics: MazeGenerator builds one and hands it out.
 /// </summary>
 public class FloorProfile
 {
     public const int FinalFloor = 5;
+
+    /// <summary>
+    /// A floor's grid size and corridor scale - a "kind" of floor, not a point on a first/final slope
+    /// (F40 slice A). Voids (L-shapes, rings) are a later slice; this is rectangles and scale only.
+    /// </summary>
+    private struct Footprint
+    {
+        public int Width, Height;
+        public float CellSize, WallHeight;
+
+        public Footprint(int width, int height, float cellSize, float wallHeight)
+        {
+            Width = width;
+            Height = height;
+            CellSize = cellSize;
+            WallHeight = wallHeight;
+        }
+    }
+
+    /// <summary>
+    /// One row per floor (index 0 is floor 1). Not a (first, final) pair like the gameplay fields below -
+    /// each floor is its own hand-picked shape. Cell counts: 49, 60, 81, 96, 121.
+    /// </summary>
+    private static readonly Footprint[] Footprints =
+    {
+        new Footprint(7, 7, 4.5f, 4.0f),   // floor 1 - as now
+        new Footprint(10, 6, 4.5f, 4.0f),  // floor 2 - long east-west halls; the maze has a far side
+        new Footprint(9, 9, 4.5f, 3.2f),   // floor 3 - low ceiling; the torch lights it and the sound is close
+        new Footprint(12, 8, 5.5f, 6.0f),  // floor 4 - wide, tall halls; the beam is a small cone in a big dark space
+        new Footprint(11, 11, 4.5f, 4.0f), // floor 5 - as now
+    };
 
     /// <summary>
     /// Names the theme numbers <see cref="FloorThemes"/> assigns from - one row per "type of floor",
@@ -62,6 +94,8 @@ public class FloorProfile
 
     // ---- world
     public int Width, Height;
+    public float CellSize;
+    public float WallHeight;
     public int StarCount;
     public int LockerCount;
     public int CellsPerLamp;
@@ -116,8 +150,24 @@ public class FloorProfile
 
         // Pairs are (first floor, final floor). The final-floor values are the shipped tuning, except the
         // stare/ambush block below, which is new on every floor.
-        p.Width = Blend(7, 11, t);
-        p.Height = p.Width;
+        // Footprint is a per-floor table (decision 1), not a blend - but keep the old blend as a
+        // fallback so a floor missing from the table (impossible with FinalFloor = 5) still builds.
+        int footprintIndex = floor - 1;
+        if (footprintIndex >= 0 && footprintIndex < Footprints.Length)
+        {
+            Footprint footprint = Footprints[footprintIndex];
+            p.Width = footprint.Width;
+            p.Height = footprint.Height;
+            p.CellSize = footprint.CellSize;
+            p.WallHeight = footprint.WallHeight;
+        }
+        else
+        {
+            p.Width = Blend(7, 11, t);
+            p.Height = p.Width;
+            p.CellSize = 4.5f;
+            p.WallHeight = 4.0f;
+        }
         p.StarCount = Blend(2, 5, t);
         p.LockerCount = Blend(5, 10, t);
         // Final-floor lamps were 1 per 5 cells at 1.1 - too dark to read the maze once F27 has killed
@@ -160,7 +210,7 @@ public class FloorProfile
 
     public override string ToString()
     {
-        return $"floor {Floor}/{FinalFloor}: {Width}x{Height}, {StarCount} stars, {LockerCount} lockers, " +
+        return $"floor {Floor}/{FinalFloor}: {Width}x{Height}, cell {CellSize:0.0} wall {WallHeight:0.0}, {StarCount} stars, {LockerCount} lockers, " +
                $"hunter walk {WalkSpeed:0.0} run {RunSpeed:0.0} sees {ViewDistance:0}m, escape {EscapeSeconds:0}s, {ShardCount} shards, " +
                $"ambush {AmbushBias:0.00}";
     }
