@@ -41,6 +41,28 @@ public static class HunterBodyBuilder
     private const float DefaultEyeHeight = 1.6f;
     private const float EyeHeightPadding = 0.10f;
 
+    // F50: written into AIFollower alongside animator/eyeHeight/modelFacingYaw below. The scene's
+    // AI_Follower is a pre-existing object with its own serialized values baked into the scene YAML
+    // (acceleration 14, turnSpeed 540, animationBlendRate 10) - a new C# field default only applies to an
+    // object that has never had that field serialized before, so decision 10's "mannequin" fix has to be
+    // written the same way eyeHeight already is, or it never takes effect on this scene.
+    private const float DefaultAcceleration = 6f;
+    private const float DefaultSpeedRampRate = 14f;
+    private const float DefaultAnimationBlendRate = 6f;
+    private const float DefaultTurnSpeedMoving = 200f;
+    private const float DefaultTurnSpeedStationary = 120f;
+
+    // F50: suffix the mirrored copy of a turn take gets, so BuildController's 2D tree can always find
+    // "<take>_Mirror" for the left-turn child next to the un-mirrored right-turn one.
+    private const string MirrorSuffix = "_Mirror";
+
+    // F50 decision 9: the clip's contact frame is meant to land right as GameOutcome.CaptureSequence's
+    // blackout starts. reachContactSeconds after capture, reachContactNormalizedTime through the clip -
+    // the Reach state's playback speed is scaled to land there; the clip itself is never trimmed.
+    private const float ReachContactSeconds = 0.9f;
+    private const float ReachContactNormalizedTime = 0.55f;
+    private const float PoseCrossfadeSeconds = 0.25f;
+
     [MenuItem("LIGHTS OUT/Build Hunter Body")]
     public static void Build()
     {
@@ -72,14 +94,14 @@ public static class HunterBodyBuilder
 
         EnsureFolder(ClipFolder);
 
-        ResolveClip("idle", PackIdlePath, PackIdleClipName, out AnimationClip idleClip, out string idleSource);
-        ResolveClip("walk", PackWalkPath, PackWalkClipName, out AnimationClip walkClip, out string walkSource);
+        ResolveClip("idle", true, PackIdlePath, PackIdleClipName, out AnimationClip idleClip, out string idleSource);
+        ResolveClip("walk", true, PackWalkPath, PackWalkClipName, out AnimationClip walkClip, out string walkSource);
 
         string runFbx = FindClipFbx("run");
         AnimationClip runClipFound = null;
         if (runFbx != null)
         {
-            PrepareClipFbx(runFbx);
+            PrepareClipFbx(runFbx, true);
             runClipFound = LoadClip(runFbx, null);
         }
 
@@ -97,9 +119,18 @@ public static class HunterBodyBuilder
             Debug.LogError("HunterBodyBuilder: no idle clip could be loaded (neither a custom clip nor the Guard_Idle fallback) - the Locomotion blend tree will be missing its idle pose.");
         }
 
+        // F50: the new optional keywords. Each degrades to "missing" - no state, Pose maps to Idle - when
+        // no clip resolves, exactly like the pre-existing idle/walk/run keywords did before this feature.
+        AnimationClip turnClip = ResolveTurnClip(out AnimationClip turnMirroredClip, out string turnSource);
+        AnimationClip lookClip = ResolveOptionalClip("look", true, out string lookSource);
+        AnimationClip lurkClip = ResolveOptionalClip("lurk", true, out string lurkSource);
+        AnimationClip stunClip = ResolveOptionalClip("stun", true, out string stunSource);
+        AnimationClip reachClip = ResolveOptionalClip("reach", false, out string reachSource);
+
         // ---------------------------------------------------------------- controller (rebuilt every run)
 
-        AnimatorController controller = BuildController(idleClip, walkClip, runClipForTree, runIsSpedUpWalk, walkThreshold, runThreshold);
+        AnimatorController controller = BuildController(idleClip, walkClip, runClipForTree, runIsSpedUpWalk,
+            walkThreshold, runThreshold, turnClip, turnMirroredClip, lookClip, lurkClip, stunClip, reachClip);
 
         // ---------------------------------------------------------------- measurement (needs the controller for the idle pose)
 
@@ -165,16 +196,34 @@ public static class HunterBodyBuilder
             Debug.LogWarning("HunterBodyBuilder: the instantiated body has no Animator.", bodyInstance);
         }
 
+        HunterGaze gaze = Undo.AddComponent<HunterGaze>(bodyInstance);
+        SerializedObject gazeSo = new SerializedObject(gaze);
+        gazeSo.FindProperty("follower").objectReferenceValue = aiFollower;
+        gazeSo.ApplyModifiedProperties();
+
         SerializedObject so = new SerializedObject(aiFollower);
         so.FindProperty("animator").objectReferenceValue = bodyAnimator;
         so.FindProperty("eyeHeight").floatValue = eyeHeight;
         // Humanoid: the body faces the Animator's own +Z, so there is nothing to measure - unlike the
         // Generic zombie rig, whose node could face any which way inside its own transform.
         so.FindProperty("modelFacingYaw").floatValue = 0f;
+        // F50 decision 10: the scene's AI_Follower already has its own serialized acceleration/turnSpeed/
+        // animationBlendRate values baked in from before this feature, so the "mannequin" fix has to be
+        // written here, the same way eyeHeight already is, or a new C# field default never takes effect.
+        so.FindProperty("acceleration").floatValue = DefaultAcceleration;
+        so.FindProperty("speedRampRate").floatValue = DefaultSpeedRampRate;
+        so.FindProperty("animationBlendRate").floatValue = DefaultAnimationBlendRate;
+        so.FindProperty("turnSpeedMoving").floatValue = DefaultTurnSpeedMoving;
+        so.FindProperty("turnSpeedStationary").floatValue = DefaultTurnSpeedStationary;
+        // F50 decision 8: true (the body keeps spinning during a search dwell) whenever no look clip
+        // resolved - it is the only way left to show a sweep at all without one.
+        so.FindProperty("bodySweepsDuringSearch").boolValue = lookClip == null;
         so.ApplyModifiedProperties();
 
         Debug.Log($"HunterBodyBuilder: idle={idleSource}, walk={walkSource}, run={runSource} " +
-            $"(walkThreshold={walkThreshold:F2}, runThreshold={runThreshold:F2}), eyeHeight={eyeHeight:F2} m.", bodyInstance);
+            $"(walkThreshold={walkThreshold:F2}, runThreshold={runThreshold:F2}), turn={turnSource}, " +
+            $"look={lookSource}, lurk={lurkSource}, stun={stunSource}, reach={reachSource}, " +
+            $"eyeHeight={eyeHeight:F2} m, bodySweepsDuringSearch={(lookClip == null)}.", bodyInstance);
 
         Undo.CollapseUndoOperations(undoGroup);
 
@@ -192,12 +241,12 @@ public static class HunterBodyBuilder
     /// `packFbxPath`. The pack fallback is only ever read from, except for the defensive loop-time fix
     /// in <see cref="EnsurePackClipLoops"/> (expected to be a no-op - both pack clips already loop).
     /// </summary>
-    private static void ResolveClip(string keyword, string packFbxPath, string packClipName, out AnimationClip clip, out string source)
+    private static void ResolveClip(string keyword, bool loop, string packFbxPath, string packClipName, out AnimationClip clip, out string source)
     {
         string customFbx = FindClipFbx(keyword);
         if (customFbx != null)
         {
-            PrepareClipFbx(customFbx);
+            PrepareClipFbx(customFbx, loop);
             clip = LoadClip(customFbx, null);
             if (clip != null)
             {
@@ -208,6 +257,77 @@ public static class HunterBodyBuilder
 
         clip = EnsurePackClipLoops(packFbxPath, packClipName);
         source = packClipName;
+    }
+
+    /// <summary>
+    /// F50: a keyword with no pack fallback - look/lurk/stun/reach. Missing (no file, or no non-preview
+    /// clip in it) degrades to null, exactly like a missing pack-backed keyword would if the pack itself
+    /// were incomplete: the caller maps that to Pose.Idle and the builder skips the state entirely.
+    /// </summary>
+    private static AnimationClip ResolveOptionalClip(string keyword, bool loop, out string source)
+    {
+        string fbxPath = FindClipFbx(keyword);
+        if (fbxPath == null)
+        {
+            source = "missing";
+            return null;
+        }
+
+        PrepareClipFbx(fbxPath, loop);
+        AnimationClip clip = LoadClip(fbxPath, null);
+        if (clip == null)
+        {
+            source = "missing (no clip found in file)";
+            return null;
+        }
+
+        source = Path.GetFileNameWithoutExtension(fbxPath);
+        return clip;
+    }
+
+    /// <summary>
+    /// F50 decision 7: the turn keyword additionally needs a mirrored copy of the same take for the left
+    /// turn - PrepareTurnClipFbx writes both a normal and a "&lt;take&gt;_Mirror" entry into the importer,
+    /// and this reads them back explicitly by name rather than trusting LoadClip's "first non-preview
+    /// clip" fallback, which has no reason to prefer the un-mirrored one.
+    /// </summary>
+    private static AnimationClip ResolveTurnClip(out AnimationClip mirroredClip, out string source)
+    {
+        mirroredClip = null;
+
+        string fbxPath = FindClipFbx("turn");
+        if (fbxPath == null)
+        {
+            source = "missing";
+            return null;
+        }
+
+        PrepareTurnClipFbx(fbxPath);
+
+        AnimationClip original = null;
+        foreach (UnityEngine.Object asset in AssetDatabase.LoadAllAssetRepresentationsAtPath(fbxPath))
+        {
+            if (!(asset is AnimationClip clip) || clip.name.StartsWith("__preview__")) continue;
+
+            if (clip.name.EndsWith(MirrorSuffix, StringComparison.Ordinal))
+            {
+                if (mirroredClip == null) mirroredClip = clip;
+            }
+            else if (original == null)
+            {
+                original = clip;
+            }
+        }
+
+        if (original == null)
+        {
+            source = "missing (no clip found in file)";
+            mirroredClip = null;
+            return null;
+        }
+
+        source = Path.GetFileNameWithoutExtension(fbxPath);
+        return original;
     }
 
     /// <summary>Finds an FBX model file under ClipFolder whose file name contains `keyword` (case-insensitive). First match wins.</summary>
@@ -226,11 +346,13 @@ public static class HunterBodyBuilder
     }
 
     /// <summary>
-    /// Sets a Mixamo clip FBX's importer to Humanoid/CreateFromThisModel with looping, root-locked clips,
-    /// as Decision 2 of the plan requires - but only touches the importer, and only reimports, if
-    /// something actually differs, so a rebuild does not thrash a file the user already prepared.
+    /// Sets a Mixamo clip FBX's importer to Humanoid/CreateFromThisModel with root-locked clips, as
+    /// Decision 2 of the plan requires, looping according to `loop` (F50 decision 4: everything loops
+    /// except the reach clip - without this it would restart under the capture blackout every cycle,
+    /// until Release() moves the hunter on from Captured). Only touches the importer, and only reimports,
+    /// if something actually differs, so a rebuild does not thrash a file the user already prepared.
     /// </summary>
-    private static void PrepareClipFbx(string path)
+    private static void PrepareClipFbx(string path, bool loop)
     {
         ModelImporter importer = AssetImporter.GetAtPath(path) as ModelImporter;
         if (importer == null) return;
@@ -260,12 +382,12 @@ public static class HunterBodyBuilder
         for (int i = 0; i < baseline.Length; i++)
         {
             ModelImporterClipAnimation clip = baseline[i];
-            if (!clip.loopTime || !clip.lockRootRotation || !clip.lockRootHeightY || !clip.lockRootPositionXZ
+            if (clip.loopTime != loop || !clip.lockRootRotation || !clip.lockRootHeightY || !clip.lockRootPositionXZ
                 || !clip.keepOriginalOrientation || !clip.keepOriginalPositionY || !clip.keepOriginalPositionXZ)
             {
                 clipsDiffer = true;
             }
-            clip.loopTime = true;
+            clip.loopTime = loop;
             clip.lockRootRotation = true;
             clip.lockRootHeightY = true;
             clip.lockRootPositionXZ = true;
@@ -285,6 +407,98 @@ public static class HunterBodyBuilder
         {
             importer.SaveAndReimport();
         }
+    }
+
+    /// <summary>
+    /// F50 decision 7: like PrepareClipFbx, but writes two entries per take - the original, and a
+    /// "&lt;take&gt;_Mirror" copy with `mirror = true` for the left turn. Always re-derives from
+    /// `importer.defaultClipAnimations` (never from the importer's current, possibly-already-mirrored
+    /// clipAnimations), so a rebuild can never compound into "..._Mirror_Mirror" entries.
+    /// </summary>
+    private static void PrepareTurnClipFbx(string path)
+    {
+        ModelImporter importer = AssetImporter.GetAtPath(path) as ModelImporter;
+        if (importer == null) return;
+
+        bool dirty = false;
+        if (importer.animationType != ModelImporterAnimationType.Human)
+        {
+            importer.animationType = ModelImporterAnimationType.Human;
+            dirty = true;
+        }
+        if (importer.avatarSetup != ModelImporterAvatarSetup.CreateFromThisModel)
+        {
+            importer.avatarSetup = ModelImporterAvatarSetup.CreateFromThisModel;
+            dirty = true;
+        }
+        if (!importer.importAnimation)
+        {
+            importer.importAnimation = true;
+            dirty = true;
+        }
+
+        ModelImporterClipAnimation[] existing = importer.clipAnimations;
+        ModelImporterClipAnimation[] baseline = importer.defaultClipAnimations;
+
+        ModelImporterClipAnimation[] configured = new ModelImporterClipAnimation[baseline.Length * 2];
+        for (int i = 0; i < baseline.Length; i++)
+        {
+            configured[i] = CloneWithLocks(baseline[i], false);
+            ModelImporterClipAnimation mirrored = CloneWithLocks(baseline[i], true);
+            mirrored.name = baseline[i].name + MirrorSuffix;
+            configured[baseline.Length + i] = mirrored;
+        }
+
+        bool clipsDiffer = existing == null || existing.Length != configured.Length;
+        if (!clipsDiffer)
+        {
+            for (int i = 0; i < configured.Length; i++)
+            {
+                if (existing[i].name != configured[i].name || existing[i].mirror != configured[i].mirror
+                    || existing[i].loopTime != configured[i].loopTime)
+                {
+                    clipsDiffer = true;
+                    break;
+                }
+            }
+        }
+
+        if (clipsDiffer)
+        {
+            importer.clipAnimations = configured;
+            dirty = true;
+        }
+
+        if (dirty)
+        {
+            importer.SaveAndReimport();
+        }
+    }
+
+    /// <summary>
+    /// A fresh clip-animation entry copying `source`'s take/frame range, with the standard loop + root
+    /// locks applied and mirrored if requested. Always a new object rather than a mutated `source` -
+    /// ModelImporterClipAnimation is a reference type, and PrepareTurnClipFbx needs the original and the
+    /// mirrored copy to end up as two independent entries, not two variables aliasing one.
+    /// </summary>
+    private static ModelImporterClipAnimation CloneWithLocks(ModelImporterClipAnimation source, bool mirror)
+    {
+        ModelImporterClipAnimation clip = new ModelImporterClipAnimation
+        {
+            name = source.name,
+            takeName = source.takeName,
+            firstFrame = source.firstFrame,
+            lastFrame = source.lastFrame,
+            mirror = mirror
+        };
+        clip.loopTime = true;
+        clip.lockRootRotation = true;
+        clip.lockRootHeightY = true;
+        clip.lockRootPositionXZ = true;
+        clip.keepOriginalOrientation = true;
+        clip.keepOriginalPositionY = true;
+        clip.keepOriginalPositionXZ = true;
+        return clip;
     }
 
     /// <summary>
@@ -340,13 +554,21 @@ public static class HunterBodyBuilder
     // ---------------------------------------------------------------- controller
 
     /// <summary>
-    /// Rebuilt every run - unlike Adam's own assets, this is generated data, so a stale reference to the
-    /// deleted zombie clips can never survive a rebuild. One default state, "Locomotion", holding a 1D
-    /// blend tree on Speed with explicit (not automatic) thresholds; when the run child is really the
-    /// walk clip sped up, its timeScale is set after AddChild so it plays back at the run threshold.
+    /// Hunter.controller is generated data, not authored content: this method deletes and recreates it
+    /// from scratch on every run of LIGHTS OUT &gt; Build Hunter Body, wiring whatever clips resolved this
+    /// run into a fixed shape - a Locomotion blend tree (1D on Speed, or 2D on Speed/Turn once a turn clip
+    /// exists), one state each for LookAround/Lurk/Stunned when their clip resolved, and a Reach one-shot
+    /// from Any State when a reach clip resolved. Unlike Adam's own imported assets, nothing here is meant
+    /// to survive being hand-edited in the Animator window - a state added, a transition retimed, a
+    /// parameter renamed by hand is silently wiped the next time this runs, same as it already was before
+    /// F50 for the single-state version. Treat the asset itself as disposable; this method is the only
+    /// source of truth for its contents.
     /// </summary>
-    private static AnimatorController BuildController(AnimationClip idleClip, AnimationClip walkClip, AnimationClip runClip,
-        bool runIsSpedUpWalk, float walkThreshold, float runThreshold)
+    private static AnimatorController BuildController(
+        AnimationClip idleClip, AnimationClip walkClip, AnimationClip runClip, bool runIsSpedUpWalk,
+        float walkThreshold, float runThreshold,
+        AnimationClip turnClip, AnimationClip turnMirroredClip,
+        AnimationClip lookClip, AnimationClip lurkClip, AnimationClip stunClip, AnimationClip reachClip)
     {
         if (AssetDatabase.LoadAssetAtPath<AnimatorController>(ControllerPath) != null)
         {
@@ -358,34 +580,149 @@ public static class HunterBodyBuilder
         controller.AddParameter("Speed", AnimatorControllerParameterType.Float);
         controller.AddParameter("MotionSpeed", AnimatorControllerParameterType.Float);
         controller.AddParameter("Grounded", AnimatorControllerParameterType.Bool);
+        // F50: always added, whether or not any of the states below end up existing - AIFollower's own
+        // Start() guard is what makes writing to these safe on a controller that lacks them (the Timmy
+        // fallback), not their absence here.
+        controller.AddParameter("Pose", AnimatorControllerParameterType.Int);
+        controller.AddParameter("Turn", AnimatorControllerParameterType.Float);
+        controller.AddParameter("Reach", AnimatorControllerParameterType.Trigger);
 
-        AnimatorState locomotionState = controller.CreateBlendTreeInController("Locomotion", out BlendTree tree, 0);
-        tree.blendType = BlendTreeType.Simple1D;
-        tree.blendParameter = "Speed";
-        tree.useAutomaticThresholds = false;
+        AnimatorStateMachine root = controller.layers[0].stateMachine;
 
-        if (idleClip != null) tree.AddChild(idleClip, 0f);
-        if (walkClip != null) tree.AddChild(walkClip, walkThreshold);
+        AnimatorState locomotionState = BuildLocomotionState(controller, idleClip, walkClip, runClip,
+            runIsSpedUpWalk, walkThreshold, runThreshold, turnClip, turnMirroredClip);
+        root.defaultState = locomotionState;
 
-        int runChildIndex = -1;
-        if (runClip != null)
-        {
-            tree.AddChild(runClip, runThreshold);
-            runChildIndex = tree.children.Length - 1;
-        }
-
-        if (runIsSpedUpWalk && runChildIndex >= 0 && walkThreshold > 0.0001f)
-        {
-            ChildMotion[] children = tree.children;
-            children[runChildIndex].timeScale = runThreshold / walkThreshold;
-            tree.children = children;
-        }
-
-        controller.layers[0].stateMachine.defaultState = locomotionState;
+        AddPoseState(root, locomotionState, "LookAround", lookClip, AIFollower.Pose.LookAround);
+        AddPoseState(root, locomotionState, "Lurk", lurkClip, AIFollower.Pose.Lurk);
+        AddPoseState(root, locomotionState, "Stunned", stunClip, AIFollower.Pose.Stunned);
+        AddReachState(root, locomotionState, reachClip);
 
         EditorUtility.SetDirty(controller);
         AssetDatabase.SaveAssets();
         return controller;
+    }
+
+    /// <summary>
+    /// The Locomotion blend tree. A 1D tree on Speed alone, as before F50, unless a turn clip (and its
+    /// mirrored copy) resolved - then a 2D freeform-cartesian tree on (Speed, Turn), with the turn clip at
+    /// (0, +1) and its mirror at (0, -1) for the opposite direction. Explicit thresholds throughout, not
+    /// automatic - the run child's threshold is the actual clip speed (or, for a sped-up walk, the walk
+    /// threshold's own timeScale multiple), not wherever AddChild happened to land it.
+    /// </summary>
+    private static AnimatorState BuildLocomotionState(AnimatorController controller,
+        AnimationClip idleClip, AnimationClip walkClip, AnimationClip runClip, bool runIsSpedUpWalk,
+        float walkThreshold, float runThreshold, AnimationClip turnClip, AnimationClip turnMirroredClip)
+    {
+        AnimatorState locomotionState = controller.CreateBlendTreeInController("Locomotion", out BlendTree tree, 0);
+
+        if (turnClip != null && turnMirroredClip != null)
+        {
+            tree.blendType = BlendTreeType.FreeformCartesian2D;
+            tree.blendParameter = "Speed";
+            tree.blendParameterY = "Turn";
+
+            if (idleClip != null) tree.AddChild(idleClip, new Vector2(0f, 0f));
+            if (walkClip != null) tree.AddChild(walkClip, new Vector2(walkThreshold, 0f));
+
+            int runChildIndex = -1;
+            if (runClip != null)
+            {
+                tree.AddChild(runClip, new Vector2(runThreshold, 0f));
+                runChildIndex = tree.children.Length - 1;
+            }
+
+            tree.AddChild(turnClip, new Vector2(0f, 1f));
+            tree.AddChild(turnMirroredClip, new Vector2(0f, -1f));
+
+            if (runIsSpedUpWalk && runChildIndex >= 0 && walkThreshold > 0.0001f)
+            {
+                ChildMotion[] children = tree.children;
+                children[runChildIndex].timeScale = runThreshold / walkThreshold;
+                tree.children = children;
+            }
+        }
+        else
+        {
+            tree.blendType = BlendTreeType.Simple1D;
+            tree.blendParameter = "Speed";
+            tree.useAutomaticThresholds = false;
+
+            if (idleClip != null) tree.AddChild(idleClip, 0f);
+            if (walkClip != null) tree.AddChild(walkClip, walkThreshold);
+
+            int runChildIndex = -1;
+            if (runClip != null)
+            {
+                tree.AddChild(runClip, runThreshold);
+                runChildIndex = tree.children.Length - 1;
+            }
+
+            if (runIsSpedUpWalk && runChildIndex >= 0 && walkThreshold > 0.0001f)
+            {
+                ChildMotion[] children = tree.children;
+                children[runChildIndex].timeScale = runThreshold / walkThreshold;
+                tree.children = children;
+            }
+        }
+
+        return locomotionState;
+    }
+
+    /// <summary>
+    /// F50 decision 2/11: a state that exists only when its clip resolved, entered/exited purely on Pose
+    /// equality - a 0.25s crossfade each way, no exit time, so the transition starts the instant
+    /// AIFollower's UpdateAnimator writes the new Pose rather than waiting for Locomotion to loop round.
+    /// </summary>
+    private static void AddPoseState(AnimatorStateMachine root, AnimatorState locomotionState, string stateName,
+        AnimationClip clip, AIFollower.Pose pose)
+    {
+        if (clip == null) return;
+
+        AnimatorState state = root.AddState(stateName);
+        state.motion = clip;
+
+        AnimatorStateTransition toState = locomotionState.AddTransition(state);
+        toState.hasExitTime = false;
+        toState.duration = PoseCrossfadeSeconds;
+        toState.AddCondition(AnimatorConditionMode.Equals, (float)(int)pose, "Pose");
+
+        AnimatorStateTransition toLocomotion = state.AddTransition(locomotionState);
+        toLocomotion.hasExitTime = false;
+        toLocomotion.duration = PoseCrossfadeSeconds;
+        toLocomotion.AddCondition(AnimatorConditionMode.NotEqual, (float)(int)pose, "Pose");
+    }
+
+    /// <summary>
+    /// F50 decision 9: only added when a reach clip resolved (the Reach parameter itself always exists -
+    /// see BuildController - so a missing clip just means the trigger fires and nothing plays). Entered
+    /// from Any State on the Reach trigger, canTransitionToSelf false so the trigger re-firing mid-clip
+    /// (it does not, AIFollower only sets it once in EnterCaptured, but Any State transitions are shared
+    /// machinery) can never restart it. Exits to Locomotion on exit time 1.0, not "no exit": Release()
+    /// (Second Wind) can take the hunter from Captured back to Wander mid-reach, and without this exit the
+    /// animator would sit on the clip's last frame for the whole stun that follows.
+    /// </summary>
+    private static void AddReachState(AnimatorStateMachine root, AnimatorState locomotionState, AnimationClip reachClip)
+    {
+        if (reachClip == null) return;
+
+        AnimatorState state = root.AddState("Reach");
+        state.motion = reachClip;
+        if (reachClip.length > 0.0001f)
+        {
+            state.speed = (ReachContactNormalizedTime * reachClip.length) / ReachContactSeconds;
+        }
+
+        AnimatorStateTransition fromAny = root.AddAnyStateTransition(state);
+        fromAny.hasExitTime = false;
+        fromAny.duration = 0f;
+        fromAny.canTransitionToSelf = false;
+        fromAny.AddCondition(AnimatorConditionMode.If, 0f, "Reach");
+
+        AnimatorStateTransition toLocomotion = state.AddTransition(locomotionState);
+        toLocomotion.hasExitTime = true;
+        toLocomotion.exitTime = 1.0f;
+        toLocomotion.duration = PoseCrossfadeSeconds;
     }
 
     // ---------------------------------------------------------------- measurement

@@ -20,7 +20,10 @@ public class AIFollower : MonoBehaviour
     [SerializeField] private float runDistance = 4f;
     [Tooltip("The agent decelerates to a stop this far from the target. Kept inside captureRadius in TickChase, or it would park out of reach.")]
     [SerializeField] private float stoppingDistance = 0.9f;
-    [SerializeField] private float acceleration = 14f;
+    [Tooltip("NavMeshAgent.acceleration - how hard it leans into a change of speed. Split from speedRampRate (F50): this one only affects the agent's own steering, so slowing it down does not stretch the moveSpeed-to-runSpeed jump when the hatch opens.")]
+    [SerializeField] private float acceleration = 6f;
+    [Tooltip("How fast MoveSpeedTowards ramps the agent's target speed (m/s^2). Kept at the old acceleration value (14) so the hatch-opens jump to runSpeed still lands in about 0.3s - see the comment on ChaseSpeed.")]
+    [SerializeField] private float speedRampRate = 14f;
 
     [Header("Following")]
     [Tooltip("How often the destination is refreshed (seconds)")]
@@ -97,17 +100,42 @@ public class AIFollower : MonoBehaviour
     [SerializeField] private float ambushPlayerExclusionRadius = 4.5f;
 
     [Header("Rotation")]
+    [Tooltip("Turn rate while chasing with sight (deg/s). Kept fast on purpose (F50): this is what holds a nearby player inside the sight cone, and dropping it would let a sprinting player two metres away out-turn it.")]
     [SerializeField] private float turnSpeed = 540f;
+    [Tooltip("Turn rate while moving in any other state (deg/s). F50: slower than the chase-with-sight rate so ordinary turning reads as something with feet, not a turret.")]
+    [SerializeField] private float turnSpeedMoving = 200f;
+    [Tooltip("Turn rate while stationary - a search dwell without a look clip, facing a hiding spot, facing the ambushed star (deg/s).")]
+    [SerializeField] private float turnSpeedStationary = 120f;
 
     [Header("Animation")]
     [SerializeField] private Animator animator;
-    [SerializeField] private float animationBlendRate = 10f;
+    [SerializeField] private float animationBlendRate = 6f;
     [Tooltip("Yaw (degrees) the visible mesh faces relative to its Animator node's +Z. 0 for the Timmy robot. A Generic rig whose model faces sideways in its file (ZombieSmooth.fbx faces +X) needs this so the sight cone, the turn-to-face and the eyes all use the face, not the node axis. Written by LIGHTS OUT > Build Hunter Body.")]
     [SerializeField] private float modelFacingYaw = 0f;
+    [Tooltip("Set by LIGHTS OUT > Build Hunter Body: true when no 'look' clip resolved. While true, a search dwell keeps spinning the body in place (the only way to show a sweep with no clip); while false, the body stays still and HunterGaze's head sweep (plus the matching CanSeeTarget cone offset) does the work instead.")]
+    [SerializeField] private bool bodySweepsDuringSearch = true;
 
     private static readonly int AnimSpeed = Animator.StringToHash("Speed");
     private static readonly int AnimGrounded = Animator.StringToHash("Grounded");
     private static readonly int AnimMotionSpeed = Animator.StringToHash("MotionSpeed");
+    private static readonly int AnimPose = Animator.StringToHash("Pose");
+    private static readonly int AnimTurn = Animator.StringToHash("Turn");
+    private static readonly int AnimReach = Animator.StringToHash("Reach");
+
+    /// <summary>
+    /// F50: the whole interface between the AI's state machine and the animator. Computed fresh every
+    /// frame in UpdateAnimator and written as the Pose int parameter (when the controller has one) - the
+    /// animator never sees State directly. Walk/Run are not poses at all: the Locomotion blend tree
+    /// reads Speed (and Turn) for those. Reach is a one-shot trigger fired from EnterCaptured, not a
+    /// Pose value - the pose stays whatever it already was (Idle, absent a stun) through a capture.
+    /// </summary>
+    public enum Pose
+    {
+        Idle,
+        LookAround,
+        Lurk,
+        Stunned
+    }
 
     private enum State
     {
@@ -122,6 +150,24 @@ public class AIFollower : MonoBehaviour
     private float _repathTimer;
     private float _animationBlend;
     private float _modelYawOffset;
+
+    // F50: which optional animator parameters actually exist on the assigned controller, checked once in
+    // Start. Without this a checkout where Build Hunter Body has not run - the Timmy robot's Starter
+    // Assets controller has no Pose/Turn/Reach - would log a console warning every single frame.
+    private bool _hasPoseParam;
+    private bool _hasTurnParam;
+    private bool _hasReachParam;
+
+    // F50: signed yaw applied by the most recent UpdateRotation call this frame (÷ dt ÷ 180, clamped
+    // ±1), consumed and reset to 0 by UpdateAnimator so a frame with no rotation call decays toward 0
+    // instead of holding a stale value.
+    private float _turnRaw;
+    private float _turnBlend;
+
+    // F50 decision 8: yaw offset applied to the sight cone during a search dwell once the body itself has
+    // stopped spinning (bodySweepsDuringSearch == false) - the same sweep HunterGaze applies to the head,
+    // read back here so the two stay in lockstep. Computed inside CanSeeTarget; 0 outside a dwell.
+    private float _scanYawOffset;
 
     // Populated by MazeGenerator. While it is empty the follower behaves exactly as it did before
     // the maze existed: it chases the player unconditionally.
@@ -208,6 +254,24 @@ public class AIFollower : MonoBehaviour
 
     /// <summary>True once the hatch is open and the endgame chase is on (mirrors SetThreatLevel's hunting flag).</summary>
     public bool IsHunting => _hunting;
+
+    /// <summary>F50: true while a line-of-sight check most recently succeeded. Read by HunterGaze; never written outside UpdatePerception/legacy chase.</summary>
+    public bool HasSight => _hasSight;
+
+    /// <summary>F50: true while actively sweeping the area around a noise or a lost sighting.</summary>
+    public bool IsSearching => _state == State.Search;
+
+    /// <summary>F50: the pose UpdateAnimator computed this frame - see the Pose enum doc comment.</summary>
+    public Pose CurrentPose { get; private set; }
+
+    /// <summary>F50: the last position sight or hearing actually placed the player at.</summary>
+    public Vector3 LastKnownPosition => _lastKnownPosition;
+
+    /// <summary>F50: yaw offset (degrees) currently applied to the sight cone during a search dwell - see the field doc comment. 0 outside a dwell.</summary>
+    public float ScanYawOffset => _scanYawOffset;
+
+    /// <summary>F50: the tracked player transform, for anything (HunterGaze) that needs to resolve their camera. May be null before FindTarget runs.</summary>
+    public Transform Target => target;
 
     /// <summary>Flat (Y-ignoring) distance to the target, or float.MaxValue with no target.</summary>
     public float FlatDistanceToTarget => target != null ? FlatDirection(target.position - transform.position).magnitude : float.MaxValue;
@@ -414,6 +478,16 @@ public class AIFollower : MonoBehaviour
             // The starter animator controller defaults these to false / 0, which freezes the legs in the air pose
             animator.SetBool(AnimGrounded, true);
             animator.SetFloat(AnimMotionSpeed, 1f);
+
+            // F50: checked once, not every frame - SetInteger/SetFloat/SetTrigger on a parameter the
+            // controller does not have logs a warning each call, and the Timmy robot's untouched Starter
+            // Assets controller has none of these.
+            foreach (AnimatorControllerParameter param in animator.parameters)
+            {
+                if (param.type == AnimatorControllerParameterType.Int && param.name == "Pose") _hasPoseParam = true;
+                else if (param.type == AnimatorControllerParameterType.Float && param.name == "Turn") _hasTurnParam = true;
+                else if (param.type == AnimatorControllerParameterType.Trigger && param.name == "Reach") _hasReachParam = true;
+            }
         }
     }
 
@@ -453,6 +527,10 @@ public class AIFollower : MonoBehaviour
             UpdateAnimator();
             return;
         }
+
+        // F50 decision 8: every frame, before perception, so both the sight cone (CanSeeTarget) and the
+        // head sweep (HunterGaze.SweepPoint) read the same, current value.
+        _scanYawOffset = ComputeScanYawOffset();
 
         if (_wanderPoints.Count == 0)
         {
@@ -628,13 +706,46 @@ public class AIFollower : MonoBehaviour
 
         // The follower's own transform is yawed away from the visible model, so the cone has to be
         // built around the model's forward or the robot would "see" sideways.
-        Vector3 facing = ModelForward();
+        //
+        // F50 decision 8: during a search dwell where the body has stopped spinning (bodySweepsDuringSearch
+        // == false), the cone itself sweeps by _scanYawOffset instead - the same sweep HunterGaze applies
+        // to the head - so losing the body spin does not quietly weaken the search.
+        // _scanYawOffset is refreshed every frame in Update, not here: this method runs only every
+        // sightCheckInterval and returns early on distance, so computing it here would leave HunterGaze
+        // reading a frozen value whenever the player is out of range.
+        Vector3 facing = FlatDirection(Quaternion.AngleAxis(_scanYawOffset, Vector3.up) * ModelForward());
         if (Vector3.Angle(facing, flat) > viewAngle * 0.5f)
         {
             return false;
         }
 
         return HasLineOfSight(eye, chest);
+    }
+
+    /// <summary>
+    /// F50 decision 8: a slow ±60 degree sine sweep (one full cycle over the dwell), active only while
+    /// standing still at a search spot with no look clip to show it (bodySweepsDuringSearch), and never
+    /// at a hiding spot front (it stares straight at the locker there, same as the body always has).
+    /// Called once per frame from Update; CanSeeTarget and HunterGaze only read the cached result.
+    /// </summary>
+    private const float ScanSweepDegrees = 60f;
+
+    private float ComputeScanYawOffset()
+    {
+        if (_state != State.Search || _searchDwellTimer <= 0f || bodySweepsDuringSearch || AtHidingSpotFront())
+        {
+            return 0f;
+        }
+
+        float elapsed = Mathf.Clamp(searchDwellTime - _searchDwellTimer, 0f, searchDwellTime);
+        float t = searchDwellTime > 0.0001f ? elapsed / searchDwellTime : 0f;
+        return Mathf.Sin(t * Mathf.PI * 2f) * ScanSweepDegrees;
+    }
+
+    /// <summary>True while the search sweep's current front-of-queue spot is a hiding spot (a locker front).</summary>
+    private bool AtHidingSpotFront()
+    {
+        return _searchQueue.Count > 0 && _hidingSpots.Contains(_searchQueue[0]);
     }
 
     /// <summary>
@@ -806,6 +917,9 @@ public class AIFollower : MonoBehaviour
         _bustingHidingSpot = false;
         _agent.isStopped = true;
         _agent.velocity = Vector3.zero;
+        // F50 decision 9: one-shot, from Any State. Pose is left alone - Reach plays over whatever pose
+        // (normally Idle) UpdateAnimator was already writing.
+        if (_hasReachParam) animator.SetTrigger(AnimReach);
         PlayerCaught?.Invoke();
     }
 
@@ -897,14 +1011,17 @@ public class AIFollower : MonoBehaviour
             _searchDwellTimer -= Time.deltaTime;
             _agent.isStopped = true;
 
-            if (_searchQueue.Count > 0 && _hidingSpots.Contains(_searchQueue[0]))
+            if (AtHidingSpotFront())
             {
                 UpdateRotation(FlatDirection(_searchQueue[0] - transform.position));
             }
-            else
+            else if (bodySweepsDuringSearch)
             {
                 UpdateRotation(Quaternion.AngleAxis(120f * Time.deltaTime, Vector3.up) * ModelForward());
             }
+            // F50 decision 8: with a look clip, the body stops spinning here - LookAround plays and
+            // HunterGaze sweeps the head instead, with CanSeeTarget's _scanYawOffset keeping the cone
+            // itself sweeping by the same amount so the search is not weakened by the body standing still.
 
             if (_searchDwellTimer <= 0f)
             {
@@ -1168,7 +1285,9 @@ public class AIFollower : MonoBehaviour
 
     private void MoveSpeedTowards(float desiredSpeed)
     {
-        _agent.speed = Mathf.MoveTowards(_agent.speed, desiredSpeed, acceleration * Time.deltaTime);
+        // F50: speedRampRate, not acceleration - acceleration is now the (slower) NavMeshAgent steering
+        // value, and sharing it here would stretch the moveSpeed-to-runSpeed jump when the hatch opens.
+        _agent.speed = Mathf.MoveTowards(_agent.speed, desiredSpeed, speedRampRate * Time.deltaTime);
     }
 
     /// <summary>Index of the wander point closest to the nearest star still standing, or -1.</summary>
@@ -1303,15 +1422,60 @@ public class AIFollower : MonoBehaviour
     {
         if (lookDirection.sqrMagnitude < 0.0001f)
         {
+            // Nothing turned this frame - decay Turn toward 0 rather than holding a stale value from the
+            // last frame that actually called this (UpdateRotation is not called every frame: not during
+            // a stun, not from TickCaptured once the player is dead centre).
+            _turnRaw = 0f;
             return;
         }
 
+        // F50 decision 7: fast only while chasing with sight - that is what holds a nearby player inside
+        // the cone. Everywhere else, a slower pair split by whether the agent is actually moving.
+        float rate = (_state == State.Chase && _hasSight)
+            ? turnSpeed
+            : (_agent.velocity.sqrMagnitude > 0.01f ? turnSpeedMoving : turnSpeedStationary);
+
+        Quaternion before = transform.rotation;
         Quaternion desired = Quaternion.LookRotation(lookDirection.normalized, Vector3.up) * Quaternion.Euler(0f, -_modelYawOffset, 0f);
-        transform.rotation = Quaternion.RotateTowards(transform.rotation, desired, turnSpeed * Time.deltaTime);
+        transform.rotation = Quaternion.RotateTowards(before, desired, rate * Time.deltaTime);
+
+        // F50: signed yaw actually applied this frame, normalised to roughly ±1 for the animator's Turn
+        // parameter. Guarded against dt == 0, which happens every frame the run clock is frozen (title
+        // screen, pause) behind Update's own timeScale gates.
+        float dt = Time.deltaTime;
+        if (dt > 1e-5f)
+        {
+            float signedYaw = Vector3.SignedAngle(
+                FlatDirection(before * Vector3.forward),
+                FlatDirection(transform.rotation * Vector3.forward),
+                Vector3.up);
+            _turnRaw = Mathf.Clamp(signedYaw / dt / 180f, -1f, 1f);
+        }
+        else
+        {
+            _turnRaw = 0f;
+        }
     }
 
     private void UpdateAnimator()
     {
+        // F50: the pose is computed - and CurrentPose kept truthful - even with no animator assigned, so
+        // HunterGaze and anything else reading it works before Build Hunter Body has ever run.
+        Pose pose = Pose.Idle;
+        if (Time.time < _stunnedUntil)
+        {
+            pose = Pose.Stunned;
+        }
+        else if (_state == State.Ambush && _ambushArrived)
+        {
+            pose = Pose.Lurk;
+        }
+        else if (_state == State.Search && _searchDwellTimer > 0f && !AtHidingSpotFront())
+        {
+            pose = Pose.LookAround;
+        }
+        CurrentPose = pose;
+
         if (animator == null)
         {
             return;
@@ -1324,9 +1488,21 @@ public class AIFollower : MonoBehaviour
             _animationBlend = 0f;
         }
 
+        // Consumed and reset every call, whether or not UpdateRotation ran this frame - see the field
+        // doc comment.
+        _turnBlend = Mathf.Lerp(_turnBlend, _turnRaw, Time.deltaTime * animationBlendRate);
+        if (Mathf.Abs(_turnBlend) < 0.005f)
+        {
+            _turnBlend = 0f;
+        }
+        _turnRaw = 0f;
+
         animator.SetFloat(AnimSpeed, _animationBlend);
         animator.SetFloat(AnimMotionSpeed, 1f);
         animator.SetBool(AnimGrounded, true);
+
+        if (_hasPoseParam) animator.SetInteger(AnimPose, (int)pose);
+        if (_hasTurnParam) animator.SetFloat(AnimTurn, _turnBlend);
     }
 
     private void FindTarget()
