@@ -124,6 +124,30 @@ public class MazeGenerator : MonoBehaviour
     [Tooltip("Corridor pitch when GameFlow.UseKitMaze is set. Whole metres so 3M/2M/1M pieces fill a wall exactly.")]
     [SerializeField] private int kitCellSize = 5;
 
+    /// <summary>
+    /// F70: one dressing source, two providers. Every prop pass (wall/ceiling/floor props, decals, set
+    /// pieces, dust) reads this instead of _theme directly, so the kit maze gets the shared prop set
+    /// without faking a FloorTheme. Resolved once by ResolveDressing, right after ResolveKitTheme.
+    /// </summary>
+    private struct MazeDressing
+    {
+        public PropPiece[] Props;
+        public SetPiece[] SetPieces;
+        public DustMotes Dust;
+        public float WallPropChance, CeilingPropChance, FloorPropChance, WallDecalChance, FloorDecalChance;
+        public int MaxDecalsPerCell, SetPieceCount;
+    }
+
+    /// <summary>F70: bookkeeping for one recorded 3 m kit wall piece (SpawnKitWallRun), so BuildKitGates can
+    /// replace it and BuildKitWallLights can tell which of its two faces look into a real (non-void,
+    /// non-set-piece) cell.</summary>
+    private struct KitWallSegment
+    {
+        public GameObject Piece;
+        public Vector2Int? CellPlus;
+        public Vector2Int? CellMinus;
+    }
+
     // Wall flags per cell. The west/south walls are the ones actually built; the east wall of cell
     // (x, z) is the west wall of (x + 1, z), so carving a passage clears both sides.
     private bool[,] _wallN;
@@ -156,8 +180,16 @@ public class MazeGenerator : MonoBehaviour
     /// <summary>F48: true when GameFlow.UseKitMaze is set and a complete KitMazeTheme was found. _theme stays null in this mode - see ResolveKitTheme.</summary>
     private bool _kitMode;
     private Transform _wallsGroup, _pillarsGroup, _floorGroup, _ceilingGroup, _lampsGroup, _lockersGroup, _propsGroup;
+    /// <summary>F70: parents for set-piece and decal clones, created alongside the other groups in BuildGeometry.</summary>
+    private Transform _setPiecesGroup, _decalsGroup;
     /// <summary>Wall directions already taken by a wall prop, per cell. Consulted by BuildCeilingProps (no double-dressing a cell) and SpawnShards (no shard clipping a prop).</summary>
     private readonly Dictionary<Vector2Int, List<Vector3>> _propWalls = new Dictionary<Vector2Int, List<Vector3>>();
+    /// <summary>F70: resolved once by ResolveDressing. Every prop/decal/set-piece pass reads this, never _theme directly.</summary>
+    private MazeDressing _dressing;
+    /// <summary>F70: cells a set piece has reserved this run. Skipped by wall/ceiling/floor props and decals; also used by kit trees so a tree does not double up with a set piece.</summary>
+    private readonly HashSet<Vector2Int> _setPieceCells = new HashSet<Vector2Int>();
+    /// <summary>F70 kit mode: every 3 m wall piece SpawnKitWallRun laid down, keyed by its wall-segment name prefix (e.g. "Wall_W_0_3"), so BuildKitGates can replace one and BuildKitWallLights can dress the rest.</summary>
+    private readonly Dictionary<string, List<KitWallSegment>> _kitWallSegments = new Dictionary<string, List<KitWallSegment>>();
 
     /// <summary>The theme this maze was built from, or null when the primitive fallback was used.</summary>
     public FloorTheme Theme => _theme;
@@ -214,6 +246,7 @@ public class MazeGenerator : MonoBehaviour
         ResolveTheme();
 
         ResolveKitTheme(); // sets _kitMode; when true also forces _theme = null
+        ResolveDressing();
         if (_kitMode)
         {
             // Guard ahead of the general clamp below: at minCorridorWidth 4 and wallThickness 0.4 the
@@ -261,11 +294,19 @@ public class MazeGenerator : MonoBehaviour
         BuildPillars();
         BuildLockers();
 
+        // F70, pre-bake: set pieces reserve their cell (and record their wall in _propWalls) before wall
+        // props run, so BuildWallProps/BuildCeilingProps skip them. +8 is a new offset, never read by
+        // anything that existed before this feature.
+        BuildSetPieces(new System.Random(usedSeed + 8));
+
         // +4 is the RNG offset props own (+0 carve, +1 stars, +2 lamps, +3 lockers, +5 shards). One
         // instance is threaded through both prop passes below so the stream stays continuous across the
         // navmesh bake between them - same seed and floor always puts props on the same walls.
         System.Random propRng = new System.Random(usedSeed + 4);
         BuildWallProps(propRng);
+
+        // F70, pre-bake: kit-only gates and trees carry colliders, so they must go in before the bake too.
+        if (_kitMode) BuildKitDressingPreBake(new System.Random(usedSeed + 9));
 
         // Bake before anything else is placed inside the volume: the surface collects render meshes on
         // every layer, so a star, a ceiling or a robot standing in the maze would be carved out of the
@@ -276,6 +317,14 @@ public class MazeGenerator : MonoBehaviour
         BuildCeiling();
         BuildCeilingProps(propRng);
         BuildWallLamps();
+        if (_kitMode) BuildKitWallLights(new System.Random(usedSeed + 10));
+
+        // F70, post-bake: flat, collider-less dressing - safe to add after the navmesh has already
+        // been carved from the bodies built above.
+        BuildFloorProps(new System.Random(usedSeed + 6));
+        BuildDecals(new System.Random(usedSeed + 7));
+        BuildDust();
+
         DisableExistingPickups();
         SpawnStars(usedSeed);
         SpawnShards(usedSeed);
@@ -340,6 +389,54 @@ public class MazeGenerator : MonoBehaviour
 
         _kitMode = true;
         _theme = null;
+    }
+
+    /// <summary>
+    /// F70 decision 6: one dressing source, two providers. Called right after ResolveKitTheme, so
+    /// _theme/_kitMode are both settled. Themed floor -> _theme's fields. Kit mode -> kitTheme's common
+    /// dressing fields, with wall/ceiling prop chances forced to 0 (decision 7: the kit set never gets
+    /// theme wall/ceiling props). Anything else (primitive fallback) -> every field stays at its C#
+    /// default (null/0), so BuildWallProps and friends' empty/zero checks make every new pass a no-op -
+    /// the graceful-degradation rule in decision 14.
+    /// </summary>
+    private void ResolveDressing()
+    {
+        if (_theme != null)
+        {
+            _dressing = new MazeDressing
+            {
+                Props = _theme.Props,
+                SetPieces = _theme.SetPieces,
+                Dust = _theme.Dust,
+                WallPropChance = _theme.WallPropChance,
+                CeilingPropChance = _theme.CeilingPropChance,
+                FloorPropChance = _theme.FloorPropChance,
+                WallDecalChance = _theme.WallDecalChance,
+                FloorDecalChance = _theme.FloorDecalChance,
+                MaxDecalsPerCell = _theme.MaxDecalsPerCell,
+                SetPieceCount = _theme.SetPieceCount
+            };
+        }
+        else if (_kitMode && kitTheme != null)
+        {
+            _dressing = new MazeDressing
+            {
+                Props = kitTheme.Props,
+                SetPieces = kitTheme.SetPieces,
+                Dust = kitTheme.Dust,
+                WallPropChance = 0f,
+                CeilingPropChance = 0f,
+                FloorPropChance = kitTheme.FloorPropChance,
+                WallDecalChance = kitTheme.WallDecalChance,
+                FloorDecalChance = kitTheme.FloorDecalChance,
+                MaxDecalsPerCell = kitTheme.MaxDecalsPerCell,
+                SetPieceCount = kitTheme.SetPieceCount
+            };
+        }
+        else
+        {
+            _dressing = default;
+        }
     }
 
     /// <summary>
@@ -887,15 +984,19 @@ public class MazeGenerator : MonoBehaviour
     // ---------------------------------------------------------------- props
 
     /// <summary>
-    /// Themed only, built before the navmesh bake so a prop's body collider carves the navmesh like a
-    /// locker does. One prop per eligible cell at most. Skips the start cell, the AI cell and every
-    /// locker cell (decision 6). Clears and repopulates _propWalls, which BuildCeilingProps and
-    /// SpawnShards both consult afterwards.
+    /// Built before the navmesh bake so a prop's body collider carves the navmesh like a locker does.
+    /// One prop per eligible cell at most. Skips the start cell, the AI cell and every locker cell
+    /// (decision 6). Themed floor or kit mode via _dressing (F70 decision 6/16) - reads _dressing instead
+    /// of _theme directly, but draws from propRng in exactly the order it always has (chance, wall pick,
+    /// prop pick), so an existing seed's props land on the same walls as before this feature. The new
+    /// _setPieceCells skip is checked only after all of those draws (F70 decision 16).
+    ///
+    /// _propWalls itself is no longer cleared here - BuildSetPieces runs first and needs to leave its
+    /// reservations in place for this pass to skip, so the Clear moved to the top of BuildSetPieces.
     /// </summary>
     private void BuildWallProps(System.Random rng)
     {
-        _propWalls.Clear();
-        if (_theme == null || _theme.Props == null || _theme.Props.Length == 0) return;
+        if (_dressing.Props == null || _dressing.Props.Length == 0) return;
 
         Vector2Int aiCell = FarthestCell();
         HashSet<Vector2Int> lockerCellSet = new HashSet<Vector2Int>(_lockerCells);
@@ -911,7 +1012,7 @@ public class MazeGenerator : MonoBehaviour
 
                 Vector2Int cell = new Vector2Int(x, z);
                 if (lockerCellSet.Contains(cell)) continue;
-                if (rng.NextDouble() >= _theme.WallPropChance) continue;
+                if (rng.NextDouble() >= _dressing.WallPropChance) continue;
 
                 walls.Clear();
                 if (_wallN[x, z]) walls.Add(Vector3.forward);
@@ -921,8 +1022,13 @@ public class MazeGenerator : MonoBehaviour
                 if (walls.Count == 0) continue;
 
                 Vector3 dir = walls[rng.Next(walls.Count)];
-                PropPiece prop = PickWeightedProp(_theme.Props, PropPiece.MountKind.Wall, rng);
+                PropPiece prop = PickWeightedProp(_dressing.Props, PropPiece.MountKind.Wall, rng);
                 if (prop == null) return; // no wall props in this theme, nothing more to try
+
+                // F70: a set piece already claimed this cell. Checked after every RNG draw the cell
+                // makes (chance, wall pick, prop pick), same rule as the low-ceiling guard below, so an
+                // old scene (no set pieces) draws exactly as it always has.
+                if (_setPieceCells.Contains(cell)) continue;
 
                 Vector3 pos = CellCenter(x, z) + dir * backFaceDistance;
                 PropPiece clone = Instantiate(prop, pos, Quaternion.LookRotation(-dir), _propsGroup);
@@ -939,10 +1045,10 @@ public class MazeGenerator : MonoBehaviour
         }
     }
 
-    /// <summary>Themed only, built after the navmesh bake. Never shares a cell with a wall prop (decision 6, "keeps clutter readable").</summary>
+    /// <summary>Built after the navmesh bake. Never shares a cell with a wall prop (decision 6, "keeps clutter readable") or a set piece.</summary>
     private void BuildCeilingProps(System.Random rng)
     {
-        if (_theme == null || _theme.Props == null || _theme.Props.Length == 0) return;
+        if (_dressing.Props == null || _dressing.Props.Length == 0) return;
 
         for (int x = 0; x < width; x++)
         {
@@ -953,9 +1059,9 @@ public class MazeGenerator : MonoBehaviour
                 Vector2Int cell = new Vector2Int(x, z);
                 if (_lockerCells.Contains(cell)) continue;
                 if (_propWalls.ContainsKey(cell)) continue;
-                if (rng.NextDouble() >= _theme.CeilingPropChance) continue;
+                if (rng.NextDouble() >= _dressing.CeilingPropChance) continue;
 
-                PropPiece prop = PickWeightedProp(_theme.Props, PropPiece.MountKind.Ceiling, rng);
+                PropPiece prop = PickWeightedProp(_dressing.Props, PropPiece.MountKind.Ceiling, rng);
                 if (prop == null) return; // no ceiling props in this theme, nothing more to try
 
                 Vector3 pos = CellCenter(x, z) + Vector3.up * wallHeight;
@@ -966,6 +1072,9 @@ public class MazeGenerator : MonoBehaviour
                 // the seed stream is unchanged - a taller floor still gets exactly the props, in exactly
                 // the same rotations, it would have before this guard existed.
                 if (prop.Depth > wallHeight - 2.2f) continue;
+
+                // F70: same rule as above - checked after every draw, so it never perturbs the stream.
+                if (_setPieceCells.Contains(cell)) continue;
 
                 PropPiece clone = Instantiate(prop, pos, rotation, _propsGroup);
                 clone.gameObject.SetActive(true);
@@ -995,6 +1104,290 @@ public class MazeGenerator : MonoBehaviour
         }
 
         return null; // floating point edge case only
+    }
+
+    /// <summary>
+    /// F70. Small vignettes built before the navmesh bake so their body colliders carve it like a locker
+    /// does. Reserves a cell each: skipped afterwards by BuildWallProps, BuildCeilingProps, BuildFloorProps
+    /// and BuildDecals (decision 9). Runs before BuildWallProps, so this is also where _propWalls is
+    /// cleared (decision: BuildWallProps no longer clears it itself, since it needs to see the
+    /// reservations this pass writes).
+    ///
+    /// Candidates are cells whose _distance is between 25% and 75% of the maze's max distance - far
+    /// enough from the start to not spoil the opening seconds, near enough that a set piece is not
+    /// stranded past where most runs reach. _starCells does not exist yet at this point in Awake (SpawnStars
+    /// runs later), which is why the distance band substitutes for a "not on a star" rule.
+    /// </summary>
+    private void BuildSetPieces(System.Random rng)
+    {
+        _setPieceCells.Clear();
+        _propWalls.Clear();
+        if (_dressing.SetPieces == null || _dressing.SetPieces.Length == 0 || _dressing.SetPieceCount <= 0) return;
+
+        Vector2Int aiCell = FarthestCell();
+        HashSet<Vector2Int> lockerCellSet = new HashSet<Vector2Int>(_lockerCells);
+
+        int maxDistance = 0;
+        for (int x = 0; x < width; x++)
+        {
+            for (int z = 0; z < height; z++)
+            {
+                if (_distance[x, z] > maxDistance) maxDistance = _distance[x, z];
+            }
+        }
+
+        int minDistance = Mathf.RoundToInt(maxDistance * 0.25f);
+        int maxAllowedDistance = Mathf.RoundToInt(maxDistance * 0.75f);
+
+        List<Vector2Int> candidates = new List<Vector2Int>();
+        for (int x = 0; x < width; x++)
+        {
+            for (int z = 0; z < height; z++)
+            {
+                Vector2Int cell = new Vector2Int(x, z);
+                if (x == 0 && z == 0) continue;
+                if (cell == aiCell) continue;
+                if (lockerCellSet.Contains(cell)) continue;
+                if (_distance[x, z] < minDistance || _distance[x, z] > maxAllowedDistance) continue;
+                if (WallCount(x, z) == 0) continue; // needs at least one closed wall to mount on
+                candidates.Add(cell);
+            }
+        }
+
+        Shuffle(candidates, rng);
+
+        List<Vector2Int> chosenCells = new List<Vector2Int>();
+        List<string> chosenNames = new List<string>();
+        List<Vector3> walls = new List<Vector3>(4);
+        float backFaceDistance = cellSize * 0.5f - wallThickness * 0.5f;
+        float maxWidth = cellSize - 1.4f;
+
+        foreach (Vector2Int cell in candidates)
+        {
+            if (chosenCells.Count >= _dressing.SetPieceCount) break;
+            if (!ChebyshevFarEnough(cell, chosenCells, 3)) continue;
+
+            walls.Clear();
+            if (_wallN[cell.x, cell.y]) walls.Add(Vector3.forward);
+            if (_wallE[cell.x, cell.y]) walls.Add(Vector3.right);
+            if (_wallS[cell.x, cell.y]) walls.Add(Vector3.back);
+            if (_wallW[cell.x, cell.y]) walls.Add(Vector3.left);
+            if (walls.Count == 0) continue;
+
+            Vector3 dir = walls[rng.Next(walls.Count)];
+            SetPiece piece = PickWeightedSetPiece(_dressing.SetPieces, rng, maxWidth);
+            if (piece == null) continue; // nothing fits this floor's cell size
+
+            Vector3 pos = CellCenter(cell.x, cell.y) + dir * backFaceDistance;
+            SetPiece clone = Instantiate(piece, pos, Quaternion.LookRotation(-dir), _setPiecesGroup);
+            clone.gameObject.SetActive(true);
+            clone.name = $"SetPiece_{piece.name}_{cell.x}_{cell.y}";
+
+            foreach (FlickerLight flicker in clone.GetComponentsInChildren<FlickerLight>(true))
+            {
+                flicker.Configure(rng.Next());
+            }
+
+            chosenCells.Add(cell);
+            chosenNames.Add(piece.name);
+            _setPieceCells.Add(cell);
+
+            if (!_propWalls.TryGetValue(cell, out List<Vector3> taken))
+            {
+                taken = new List<Vector3>();
+                _propWalls[cell] = taken;
+            }
+            taken.Add(dir);
+        }
+
+        if (chosenNames.Count > 0)
+        {
+            Debug.Log($"MazeGenerator: {chosenNames.Count} set pieces: {string.Join(", ", chosenNames)}", this);
+        }
+    }
+
+    /// <summary>Weighted pick among a set of pieces, honouring EnabledInMaze and Width &lt;= maxWidth (a floor with a small cellSize can't fit every set piece). Null if nothing fits or is enabled.</summary>
+    private static SetPiece PickWeightedSetPiece(SetPiece[] pieces, System.Random rng, float maxWidth)
+    {
+        float totalWeight = 0f;
+        foreach (SetPiece candidate in pieces)
+        {
+            if (candidate == null || !candidate.EnabledInMaze || candidate.Width > maxWidth) continue;
+            totalWeight += Mathf.Max(0.0001f, candidate.Weight);
+        }
+        if (totalWeight <= 0f) return null;
+
+        float roll = (float)(rng.NextDouble() * totalWeight);
+        float cumulative = 0f;
+        foreach (SetPiece candidate in pieces)
+        {
+            if (candidate == null || !candidate.EnabledInMaze || candidate.Width > maxWidth) continue;
+            cumulative += Mathf.Max(0.0001f, candidate.Weight);
+            if (roll <= cumulative) return candidate;
+        }
+
+        return null; // floating point edge case only
+    }
+
+    /// <summary>Chebyshev (grid/king-move) separation check, used by set pieces and kit trees so neither clusters in one corner. Manhattan (IsFarEnough) is what stars/lockers/shards use; Chebyshev is what the F70 plan specifies for these two.</summary>
+    private static bool ChebyshevFarEnough(Vector2Int candidate, List<Vector2Int> chosen, int minSeparation)
+    {
+        foreach (Vector2Int other in chosen)
+        {
+            int chebyshev = Mathf.Max(Mathf.Abs(candidate.x - other.x), Mathf.Abs(candidate.y - other.y));
+            if (chebyshev < minSeparation) return false;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// F70, built after the navmesh bake: low clutter against the wall base, no collider (decision 4 -
+    /// the player walks through it, the hunter never needs to path round it). New RNG stream (+6), never
+    /// read by anything that existed before this feature.
+    /// </summary>
+    private void BuildFloorProps(System.Random rng)
+    {
+        if (_dressing.Props == null || _dressing.Props.Length == 0) return;
+
+        Vector2Int aiCell = FarthestCell();
+        HashSet<Vector2Int> lockerCellSet = new HashSet<Vector2Int>(_lockerCells);
+        float backFaceDistance = cellSize * 0.5f - wallThickness * 0.5f;
+        List<Vector3> walls = new List<Vector3>(4);
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int z = 0; z < height; z++)
+            {
+                if (x == 0 && z == 0) continue;
+                if (x == aiCell.x && z == aiCell.y) continue;
+
+                Vector2Int cell = new Vector2Int(x, z);
+                if (lockerCellSet.Contains(cell)) continue;
+                if (_setPieceCells.Contains(cell)) continue;
+                if (rng.NextDouble() >= _dressing.FloorPropChance) continue;
+
+                walls.Clear();
+                if (_wallN[x, z]) walls.Add(Vector3.forward);
+                if (_wallE[x, z]) walls.Add(Vector3.right);
+                if (_wallS[x, z]) walls.Add(Vector3.back);
+                if (_wallW[x, z]) walls.Add(Vector3.left);
+
+                if (_propWalls.TryGetValue(cell, out List<Vector3> taken) && taken.Count > 0)
+                {
+                    walls.RemoveAll(dir => taken.Contains(dir));
+                }
+                if (walls.Count == 0) continue;
+
+                Vector3 dir = walls[rng.Next(walls.Count)];
+                PropPiece prop = PickWeightedProp(_dressing.Props, PropPiece.MountKind.Floor, rng);
+                if (prop == null) return; // no floor props in this set, nothing more to try
+
+                Vector3 tangent = Vector3.Cross(Vector3.up, dir);
+                float lateral = (float)(rng.NextDouble() * 2.0 - 1.0) * (cellSize * 0.5f - 1.0f);
+                Vector3 pos = CellCenter(x, z) + dir * backFaceDistance + tangent * lateral;
+                float yaw = (float)(rng.NextDouble() * 2.0 - 1.0) * 25f;
+                Quaternion rotation = Quaternion.LookRotation(-dir) * Quaternion.Euler(0f, yaw, 0f);
+
+                PropPiece clone = Instantiate(prop, pos, rotation, _propsGroup);
+                clone.gameObject.SetActive(true);
+                clone.name = $"Prop_{prop.name}_{x}_{z}";
+            }
+        }
+    }
+
+    /// <summary>
+    /// F70, built after the navmesh bake: alpha-clipped decal quads, analytic placement only (no
+    /// raycasts - decision 4.5: colliders built earlier this same Awake are not reliably queryable before
+    /// Physics.SyncTransforms, and a locker trigger would catch a ray anyway). New RNG stream (+7).
+    /// </summary>
+    private void BuildDecals(System.Random rng)
+    {
+        if (_dressing.Props == null || _dressing.Props.Length == 0) return;
+        if (_dressing.MaxDecalsPerCell <= 0) return;
+
+        float backFaceDistance = cellSize * 0.5f - wallThickness * 0.5f;
+        List<Vector3> walls = new List<Vector3>(4);
+
+        for (int x = 0; x < width; x++)
+        {
+            for (int z = 0; z < height; z++)
+            {
+                if (x == 0 && z == 0) continue;
+
+                Vector2Int cell = new Vector2Int(x, z);
+                if (_setPieceCells.Contains(cell)) continue;
+
+                Vector3 lockerWallDir = _lockerWall.TryGetValue(cell, out Vector3 lw) ? lw : Vector3.zero;
+                _propWalls.TryGetValue(cell, out List<Vector3> takenWalls);
+
+                for (int i = 0; i < _dressing.MaxDecalsPerCell; i++)
+                {
+                    float threshold = _dressing.WallDecalChance * (i == 0 ? 1f : 0.4f);
+                    if (rng.NextDouble() >= threshold) break;
+
+                    walls.Clear();
+                    if (_wallN[x, z] && lockerWallDir != Vector3.forward) walls.Add(Vector3.forward);
+                    if (_wallE[x, z] && lockerWallDir != Vector3.right) walls.Add(Vector3.right);
+                    if (_wallS[x, z] && lockerWallDir != Vector3.back) walls.Add(Vector3.back);
+                    if (_wallW[x, z] && lockerWallDir != Vector3.left) walls.Add(Vector3.left);
+                    if (takenWalls != null) walls.RemoveAll(dir => takenWalls.Contains(dir));
+                    if (walls.Count == 0) continue;
+
+                    Vector3 dir = walls[rng.Next(walls.Count)];
+                    PropPiece decal = PickWeightedProp(_dressing.Props, PropPiece.MountKind.WallDecal, rng);
+                    if (decal == null) continue;
+
+                    float lateral = (float)(rng.NextDouble() * 2.0 - 1.0) * (cellSize * 0.5f - 0.8f);
+                    float scale = Mathf.Lerp(decal.DecalSizeRange.x, decal.DecalSizeRange.y, (float)rng.NextDouble());
+                    float y = 0.3f + (float)rng.NextDouble() * 1.9f;
+                    y = scale > 1.9f ? 1.25f : Mathf.Clamp(y, scale * 0.5f + 0.3f, 2.2f - scale * 0.5f);
+                    float roll = decal.RandomRoll ? (float)rng.NextDouble() * 360f : 0f;
+
+                    Vector3 tangent = Vector3.Cross(Vector3.up, dir);
+                    Vector3 pos = CellCenter(x, z) + dir * (backFaceDistance - 0.04f) + tangent * lateral + Vector3.up * y;
+                    Quaternion rotation = Quaternion.LookRotation(-dir) * Quaternion.Euler(0f, 0f, roll);
+
+                    PropPiece clone = Instantiate(decal, pos, rotation, _decalsGroup);
+                    clone.gameObject.SetActive(true);
+                    clone.transform.localScale = Vector3.one * scale;
+                    clone.name = $"Decal_{decal.name}_{x}_{z}_{i}";
+                }
+
+                for (int i = 0; i < _dressing.MaxDecalsPerCell; i++)
+                {
+                    float threshold = _dressing.FloorDecalChance * (i == 0 ? 1f : 0.4f);
+                    if (rng.NextDouble() >= threshold) break;
+
+                    PropPiece decal = PickWeightedProp(_dressing.Props, PropPiece.MountKind.FloorDecal, rng);
+                    if (decal == null) continue;
+
+                    float offsetX = (float)(rng.NextDouble() * 2.0 - 1.0) * (cellSize * 0.5f - 0.8f);
+                    float offsetZ = (float)(rng.NextDouble() * 2.0 - 1.0) * (cellSize * 0.5f - 0.8f);
+                    float scale = Mathf.Lerp(decal.DecalSizeRange.x, decal.DecalSizeRange.y, (float)rng.NextDouble());
+                    float yaw = decal.RandomRoll ? (float)rng.NextDouble() * 360f : 0f;
+
+                    Vector3 pos = CellCenter(x, z) + new Vector3(offsetX, 0f, offsetZ) + Vector3.up * (0.004f + 0.002f * i);
+                    Quaternion rotation = Quaternion.Euler(0f, yaw, 0f);
+
+                    PropPiece clone = Instantiate(decal, pos, rotation, _decalsGroup);
+                    clone.gameObject.SetActive(true);
+                    clone.transform.localScale = Vector3.one * scale;
+                    clone.name = $"Decal_{decal.name}_{x}_{z}_{i}";
+                }
+            }
+        }
+    }
+
+    /// <summary>F70 decision 12: one camera-attached dust ParticleSystem per run. Not parented to the maze - DustMotes re-parents itself to the player camera lazily, once FirstPersonRig exists.</summary>
+    private void BuildDust()
+    {
+        if (_dressing.Dust == null) return;
+
+        DustMotes clone = Instantiate(_dressing.Dust);
+        clone.gameObject.SetActive(true);
+        clone.MarkRuntimeClone();
+        clone.name = "DustMotes";
     }
 
     // ---------------------------------------------------------------- wall lamps
@@ -1086,6 +1479,37 @@ public class MazeGenerator : MonoBehaviour
         Vector3 position = cellCenter + wallDirection * (backFaceDistance - 0.08f) + Vector3.up * lampHeight;
         Quaternion rotation = Quaternion.LookRotation(-wallDirection, Vector3.up);
 
+        // F70 (4.6): kit mode gets its own plaque lamp instead of the grey primitive cube. _theme is
+        // always null in kit mode (ResolveKitTheme), so this never competes with the themed branch below.
+        // Draws faulty then the phase exactly like the primitive branch (rng.NextDouble() < chance, then
+        // rng.Next(1000)), so the lamp RNG stream (UsedSeed + 2) is unchanged either way.
+        if (_kitMode && kitTheme != null && kitTheme.WallLamp != null)
+        {
+            // Flush with the wall face: the plaque's back is at its pivot (z = 0) and it is only 0.1 m
+            // deep, so the 0.08 m inset the other branches use would bury it in the wall.
+            Vector3 plaquePosition = cellCenter + wallDirection * backFaceDistance + Vector3.up * lampHeight;
+            GameObject plaque = Instantiate(kitTheme.WallLamp, plaquePosition, rotation, _lampsGroup);
+            plaque.SetActive(true);
+            plaque.name = $"WallLamp_{x}_{z}";
+
+            GameObject kitLightHolder = new GameObject("Light");
+            kitLightHolder.transform.SetParent(plaque.transform, false);
+            kitLightHolder.transform.localPosition = new Vector3(0f, 0f, 0.25f);
+
+            Light kitLight = kitLightHolder.AddComponent<Light>();
+            kitLight.type = LightType.Point;
+            kitLight.color = lampColor;
+            kitLight.range = lampRange;
+            kitLight.intensity = lampIntensity;
+            kitLight.shadows = LightShadows.None;
+
+            WallLamp kitLamp = plaque.AddComponent<WallLamp>();
+            bool kitFaulty = rng.NextDouble() < faultyLampChance;
+            kitLamp.Configure(kitLight, plaque.GetComponentInChildren<Renderer>(), lampIntensity, kitFaulty, rng.Next(1000), isLockerCell);
+            _lamps.Add(kitLamp);
+            return;
+        }
+
         if (_theme != null && _theme.Lamp != null)
         {
             WallLamp themedLamp = Instantiate(_theme.Lamp, position, rotation, _lampsGroup);
@@ -1176,6 +1600,8 @@ public class MazeGenerator : MonoBehaviour
         _lampsGroup = Group("Lamps");
         _lockersGroup = Group("Lockers");
         _propsGroup = Group("Props");
+        _setPiecesGroup = Group("SetPieces");
+        _decalsGroup = Group("Decals");
 
         // Always built, even when themed: cheap, and it is what PhantomDirector's silhouette falls back
         // to if the theme itself has no wall material assigned.
@@ -1346,6 +1772,7 @@ public class MazeGenerator : MonoBehaviour
         float kitY = FloorTop - 0.1f;
         int cell = Mathf.RoundToInt(cellSize);
         int[] fill = FillSpan(cell);
+        _kitWallSegments.Clear();
 
         for (int x = 0; x < width; x++)
         {
@@ -1362,32 +1789,39 @@ public class MazeGenerator : MonoBehaviour
                 // Walls are shared, so only the west and south sides are built per cell; the outer
                 // east and north sides are added once on the last column / row - same walk as
                 // BuildPrimitiveGeometry, but each side is a run of kit pieces rather than one box.
+                // F70: each call also hands SpawnKitWallRun the (nullable) cell on either side of the
+                // segment, so it can record which face of any 3 m piece looks into a real cell versus the
+                // void beyond the maze - BuildKitWallLights and BuildKitGates need that later.
                 if (_wallW[x, z])
                 {
                     SpawnKitWallRun(
                         new Vector3(origin.x + x * cell, kitY, origin.z + z * cell),
-                        alongX: false, fill, $"Wall_W_{x}_{z}");
+                        alongX: false, fill, $"Wall_W_{x}_{z}",
+                        new Vector2Int(x, z), x > 0 ? (Vector2Int?)new Vector2Int(x - 1, z) : null);
                 }
 
                 if (_wallS[x, z])
                 {
                     SpawnKitWallRun(
                         new Vector3(origin.x + x * cell, kitY, origin.z + z * cell),
-                        alongX: true, fill, $"Wall_S_{x}_{z}");
+                        alongX: true, fill, $"Wall_S_{x}_{z}",
+                        new Vector2Int(x, z), z > 0 ? (Vector2Int?)new Vector2Int(x, z - 1) : null);
                 }
 
                 if (x == width - 1 && _wallE[x, z])
                 {
                     SpawnKitWallRun(
                         new Vector3(origin.x + (x + 1) * cell, kitY, origin.z + z * cell),
-                        alongX: false, fill, $"Wall_E_{x}_{z}");
+                        alongX: false, fill, $"Wall_E_{x}_{z}",
+                        null, new Vector2Int(x, z));
                 }
 
                 if (z == height - 1 && _wallN[x, z])
                 {
                     SpawnKitWallRun(
                         new Vector3(origin.x + x * cell, kitY, origin.z + (z + 1) * cell),
-                        alongX: true, fill, $"Wall_N_{x}_{z}");
+                        alongX: true, fill, $"Wall_N_{x}_{z}",
+                        null, new Vector2Int(x, z));
                 }
             }
         }
@@ -1437,8 +1871,13 @@ public class MazeGenerator : MonoBehaviour
     /// measured pivot conventions: an east-west run's pivot sits at its +X end (position = A + offset +
     /// n along X, identity rotation); a north-south run's pivot sits at its start (position = A + offset
     /// along Z, rotated 90 degrees about Y so local +X extends toward world +Z).
+    ///
+    /// F70: cellPlus/cellMinus are the (nullable) cells on the local +Z / -Z side of this whole segment -
+    /// constant for every piece in the run, since a run is one wall of one cell-pair just split into
+    /// multiple prefab lengths. Every 3 m piece is recorded in _kitWallSegments (keyed by namePrefix) so
+    /// BuildKitGates can replace one and BuildKitWallLights can dress the rest.
     /// </summary>
-    private void SpawnKitWallRun(Vector3 a, bool alongX, int[] fill, string namePrefix)
+    private void SpawnKitWallRun(Vector3 a, bool alongX, int[] fill, string namePrefix, Vector2Int? cellPlus, Vector2Int? cellMinus)
     {
         float offset = 0f;
         for (int i = 0; i < fill.Length; i++)
@@ -1453,6 +1892,16 @@ public class MazeGenerator : MonoBehaviour
             GameObject wall = Instantiate(prefab, position, rotation, _wallsGroup);
             wall.SetActive(true);
             wall.name = $"{namePrefix}_{i}";
+
+            if (n == 3)
+            {
+                if (!_kitWallSegments.TryGetValue(namePrefix, out List<KitWallSegment> pieces))
+                {
+                    pieces = new List<KitWallSegment>();
+                    _kitWallSegments[namePrefix] = pieces;
+                }
+                pieces.Add(new KitWallSegment { Piece = wall, CellPlus = cellPlus, CellMinus = cellMinus });
+            }
 
             offset += n;
         }
@@ -1526,6 +1975,225 @@ public class MazeGenerator : MonoBehaviour
         Bounds bounds = renderers[0].bounds;
         for (int i = 1; i < renderers.Length; i++) bounds.Encapsulate(renderers[i].bounds);
         return bounds;
+    }
+
+    // ---------------------------------------------------------------- kit dressing (F70)
+
+    /// <summary>Pre-bake kit-only dressing: gates and trees both carry a body collider, so both must go in before BuildRuntimeNavMesh.</summary>
+    private void BuildKitDressingPreBake(System.Random rng)
+    {
+        BuildKitGates(rng);
+        BuildKitTrees(rng);
+    }
+
+    /// <summary>
+    /// Replaces one 3 m wall piece per chosen perimeter segment with a barred Wall_Door - an exact
+    /// drop-in swap (same measured pivot as Wall_3M). Never a segment adjacent to the start cell or
+    /// already claimed by a set piece. The outside of the maze is a void, so the gate shows fog/black
+    /// through the bars - the intended "locked exit" look.
+    /// </summary>
+    private void BuildKitGates(System.Random rng)
+    {
+        if (kitTheme.WallDoor == null || kitTheme.GateCount <= 0) return;
+
+        List<(string Prefix, Vector2Int Cell)> perimeter = new List<(string, Vector2Int)>();
+        for (int z = 0; z < height; z++)
+        {
+            if (_wallW[0, z]) perimeter.Add(($"Wall_W_0_{z}", new Vector2Int(0, z)));
+        }
+        for (int x = 0; x < width; x++)
+        {
+            if (_wallS[x, 0]) perimeter.Add(($"Wall_S_{x}_0", new Vector2Int(x, 0)));
+        }
+        for (int z = 0; z < height; z++)
+        {
+            if (_wallE[width - 1, z]) perimeter.Add(($"Wall_E_{width - 1}_{z}", new Vector2Int(width - 1, z)));
+        }
+        for (int x = 0; x < width; x++)
+        {
+            if (_wallN[x, height - 1]) perimeter.Add(($"Wall_N_{x}_{height - 1}", new Vector2Int(x, height - 1)));
+        }
+
+        perimeter.RemoveAll(segment => IsAdjacentToStart(segment.Cell) || _setPieceCells.Contains(segment.Cell));
+        ShuffleList(perimeter, rng);
+
+        List<Vector2Int> chosenCells = new List<Vector2Int>();
+        int placed = 0;
+        foreach ((string prefix, Vector2Int cell) in perimeter)
+        {
+            if (placed >= kitTheme.GateCount) break;
+            if (!ChebyshevFarEnough(cell, chosenCells, 3)) continue;
+
+            BuildKitGate(prefix, cell);
+            chosenCells.Add(cell);
+            placed++;
+        }
+    }
+
+    /// <summary>True for the start cell and its immediate (Chebyshev) neighbours - a gate must not be the first thing the player faces.</summary>
+    private static bool IsAdjacentToStart(Vector2Int cell)
+    {
+        return Mathf.Max(Mathf.Abs(cell.x), Mathf.Abs(cell.y)) <= 1;
+    }
+
+    /// <summary>Swaps the first recorded 3 m piece of one wall segment for a barred gate: same parent/position/rotation/scale, old piece disabled immediately (Destroy is deferred to end of frame, and the bake runs before then) then destroyed.</summary>
+    private void BuildKitGate(string prefix, Vector2Int cell)
+    {
+        if (!_kitWallSegments.TryGetValue(prefix, out List<KitWallSegment> pieces) || pieces.Count == 0) return;
+
+        KitWallSegment segment = pieces[0];
+        pieces.RemoveAt(0);
+        GameObject old = segment.Piece;
+        if (old == null) return;
+
+        GameObject gate = Instantiate(kitTheme.WallDoor, old.transform.position, old.transform.rotation, old.transform.parent);
+        gate.transform.localScale = old.transform.localScale;
+        gate.SetActive(true);
+        gate.name = old.name + "_Gate";
+
+        // Defensive fallback: the prefab is expected to ship its own barred colliders (measured in the
+        // plan), but if a hand edit ever strips them, the opening must still stop the player.
+        if (gate.GetComponentInChildren<Collider>() == null)
+        {
+            BoxCollider box = gate.AddComponent<BoxCollider>();
+            box.size = new Vector3(3f, 4f, 0.4f);
+            box.center = new Vector3(-1.5f, 2f, 0f);
+        }
+
+        old.SetActive(false);
+        Destroy(old);
+    }
+
+    /// <summary>
+    /// One scaled-down tree per chosen L-corner cell (exactly two closed, perpendicular walls) - never
+    /// the start/AI/locker/set-piece cell. Kept collider (trunk), so the hunter paths round it like any
+    /// other pre-bake body. Reserves the cell's two walls in _propWalls and the cell itself in
+    /// _setPieceCells, so later decal/clutter passes leave it alone.
+    /// </summary>
+    private void BuildKitTrees(System.Random rng)
+    {
+        if (kitTheme.Trees == null || kitTheme.Trees.Length == 0 || kitTheme.TreeCount <= 0) return;
+
+        Vector2Int aiCell = FarthestCell();
+        HashSet<Vector2Int> lockerCellSet = new HashSet<Vector2Int>(_lockerCells);
+
+        List<(Vector2Int Cell, Vector3 DirA, Vector3 DirB)> candidates = new List<(Vector2Int, Vector3, Vector3)>();
+        for (int x = 0; x < width; x++)
+        {
+            for (int z = 0; z < height; z++)
+            {
+                Vector2Int cell = new Vector2Int(x, z);
+                if (x == 0 && z == 0) continue;
+                if (cell == aiCell) continue;
+                if (lockerCellSet.Contains(cell)) continue;
+                if (_setPieceCells.Contains(cell)) continue;
+                if (WallCount(x, z) != 2) continue;
+
+                bool northSouth = _wallN[x, z] && _wallS[x, z];
+                bool eastWest = _wallE[x, z] && _wallW[x, z];
+                if (northSouth || eastWest) continue; // collinear - a straight wall, not a corner
+
+                Vector3 dirA = Vector3.zero;
+                Vector3 dirB = Vector3.zero;
+                if (_wallN[x, z]) dirA = Vector3.forward;
+                if (_wallE[x, z]) { if (dirA == Vector3.zero) dirA = Vector3.right; else dirB = Vector3.right; }
+                if (_wallS[x, z]) { if (dirA == Vector3.zero) dirA = Vector3.back; else dirB = Vector3.back; }
+                if (_wallW[x, z]) { if (dirA == Vector3.zero) dirA = Vector3.left; else dirB = Vector3.left; }
+
+                candidates.Add((cell, dirA, dirB));
+            }
+        }
+
+        ShuffleList(candidates, rng);
+
+        List<Vector2Int> chosenCells = new List<Vector2Int>();
+        int placed = 0;
+        float maxHeight = FloorTop + wallHeight - 0.1f;
+
+        foreach ((Vector2Int cell, Vector3 dirA, Vector3 dirB) in candidates)
+        {
+            if (placed >= kitTheme.TreeCount) break;
+            if (!ChebyshevFarEnough(cell, chosenCells, 4)) continue;
+
+            GameObject prefab = kitTheme.Trees[rng.Next(kitTheme.Trees.Length)];
+            if (prefab == null) continue;
+
+            Vector3 corner = CellCenter(cell.x, cell.y) + (dirA + dirB) * (cellSize * 0.5f - wallThickness * 0.5f - 0.9f);
+            float yaw = (float)rng.NextDouble() * 360f;
+
+            GameObject tree = Instantiate(prefab, corner, Quaternion.Euler(0f, yaw, 0f), _propsGroup);
+            tree.SetActive(true);
+            tree.name = $"Tree_{cell.x}_{cell.y}";
+            tree.transform.localScale = Vector3.one * 0.55f;
+
+            Renderer[] renderers = tree.GetComponentsInChildren<Renderer>();
+            if (renderers.Length > 0)
+            {
+                Bounds bounds = renderers[0].bounds;
+                for (int i = 1; i < renderers.Length; i++) bounds.Encapsulate(renderers[i].bounds);
+
+                float excess = bounds.max.y - corner.y;
+                float allowed = maxHeight - corner.y;
+                if (excess > 0.001f && allowed < excess)
+                {
+                    tree.transform.localScale *= Mathf.Clamp01(allowed / excess);
+                }
+            }
+
+            if (!_propWalls.TryGetValue(cell, out List<Vector3> taken))
+            {
+                taken = new List<Vector3>();
+                _propWalls[cell] = taken;
+            }
+            taken.Add(dirA);
+            taken.Add(dirB);
+            _setPieceCells.Add(cell);
+
+            chosenCells.Add(cell);
+            placed++;
+        }
+    }
+
+    /// <summary>
+    /// Post-bake: dresses every still-standing (not replaced by a gate) recorded 3 m wall piece with a
+    /// chance of a Wall_Light emissive overlay on whichever face(s) look into a real, non-reserved cell -
+    /// both faces for an interior wall (one picked at random), only the inward face for a perimeter one.
+    /// No Light component of its own (decision 10) - it is glowing geometry only.
+    /// </summary>
+    private void BuildKitWallLights(System.Random rng)
+    {
+        if (kitTheme.WallLight == null || kitTheme.WallLightChance <= 0f) return;
+
+        foreach (List<KitWallSegment> pieces in _kitWallSegments.Values)
+        {
+            foreach (KitWallSegment segment in pieces)
+            {
+                if (segment.Piece == null || !segment.Piece.activeSelf) continue; // replaced by a gate
+                if (rng.NextDouble() >= kitTheme.WallLightChance) continue;
+
+                bool plusInside = segment.CellPlus.HasValue && !_setPieceCells.Contains(segment.CellPlus.Value);
+                bool minusInside = segment.CellMinus.HasValue && !_setPieceCells.Contains(segment.CellMinus.Value);
+                if (!plusInside && !minusInside) continue; // both faces are void or reserved
+
+                bool useMinus = plusInside && minusInside ? rng.NextDouble() < 0.5 : minusInside;
+
+                GameObject overlay = Instantiate(kitTheme.WallLight, segment.Piece.transform);
+                overlay.transform.localPosition = useMinus ? new Vector3(-3f, 0f, 0f) : Vector3.zero;
+                overlay.transform.localRotation = useMinus ? Quaternion.Euler(0f, 180f, 0f) : Quaternion.identity;
+                overlay.SetActive(true);
+                overlay.name = segment.Piece.name + "_Light";
+            }
+        }
+    }
+
+    /// <summary>Same Fisher-Yates as Shuffle(List&lt;Vector2Int&gt;, rng), generic so the F70 kit-dressing passes can shuffle tuples without duplicating it.</summary>
+    private static void ShuffleList<T>(List<T> list, System.Random rng)
+    {
+        for (int i = list.Count - 1; i > 0; i--)
+        {
+            int j = rng.Next(i + 1);
+            (list[i], list[j]) = (list[j], list[i]);
+        }
     }
 
     /// <summary>

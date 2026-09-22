@@ -16,7 +16,7 @@ using UnityEngine.SceneManagement;
 /// (LoadOrCreate, same pattern as ShopRoomBuilder), and the whole Themes folder is only ever deleted
 /// when the artist explicitly picks "Replace everything".
 /// </summary>
-public static class FloorThemeBuilder
+public static partial class FloorThemeBuilder
 {
     private const string ThemesRoot = "Assets/SourceFiles/Themes";
     private const string GalleryName = "FloorThemes";
@@ -64,8 +64,10 @@ public static class FloorThemeBuilder
         if (existingSet != null) Undo.DestroyObjectImmediate(existingSet.gameObject);
         if (replaceAssets && AssetDatabase.IsValidFolder(ThemesRoot)) AssetDatabase.DeleteAsset(ThemesRoot);
         EnsureFolder(ThemesRoot);
-        // The cached plinth material may point at an asset the line above just deleted.
+        // The cached plinth material, and every F70 dressing cache under Themes/Common, may point at an
+        // asset the line above just deleted.
         _plinthMaterial = null;
+        ResetDressingCaches();
 
         GameObject galleryRoot = new GameObject(GalleryName);
         Undo.RegisterCreatedObjectUndo(galleryRoot, "Build Floor Themes");
@@ -119,6 +121,15 @@ public static class FloorThemeBuilder
         public WallLamp Lamp;
         public Locker Locker;
         public PropPiece[] Props;
+
+        // F70.
+        public float FloorPropChance;
+        public float WallDecalChance;
+        public float FloorDecalChance;
+        public int MaxDecalsPerCell;
+        public SetPiece[] SetPieces;
+        public int SetPieceCount;
+        public DustMotes Dust;
     }
 
     // ---------------------------------------------------------------- shared low-level helpers
@@ -497,6 +508,122 @@ public static class FloorThemeBuilder
         Box(ventRoot.transform, "Grille", new Vector3(0f, -0.05f, 0f), new Vector3(0.6f, 0.08f, 0.6f), metalMat, keepCollider: true);
         props.Add(FinishProp(ventRoot, folder, PropPiece.MountKind.Ceiling, 0.1f, 1f));
 
+        // ---- F70: additional props (plan section 3.3, Ward table) ----
+
+        GameObject wheelchairRoot = new GameObject("Wheelchair");
+        Box(wheelchairRoot.transform, "Seat", new Vector3(0f, 0.45f, 0.3f), new Vector3(0.5f, 0.08f, 0.5f), metalMat, keepCollider: true);
+        Box(wheelchairRoot.transform, "Back", new Vector3(0f, 0.8f, 0.05f), new Vector3(0.5f, 0.7f, 0.06f), metalMat);
+        CylinderRH(wheelchairRoot.transform, "WheelL", new Vector3(-0.28f, 0.3f, 0.32f), 0.3f, 0.04f, metalMat).transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+        CylinderRH(wheelchairRoot.transform, "WheelR", new Vector3(0.28f, 0.3f, 0.32f), 0.3f, 0.04f, metalMat).transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+        CylinderRH(wheelchairRoot.transform, "CasterL", new Vector3(-0.2f, 0.06f, 0.55f), 0.06f, 0.04f, metalMat).transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+        CylinderRH(wheelchairRoot.transform, "CasterR", new Vector3(0.2f, 0.06f, 0.55f), 0.06f, 0.04f, metalMat).transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+        props.Add(FinishProp(wheelchairRoot, folder, PropPiece.MountKind.Wall, 0.7f, 1f));
+
+        GameObject trolleyRoot = new GameObject("MedTrolley");
+        Box(trolleyRoot.transform, "ShelfTop", new Vector3(0f, 0.85f, 0.25f), new Vector3(0.5f, 0.04f, 0.35f), metalMat, keepCollider: true);
+        Box(trolleyRoot.transform, "ShelfBottom", new Vector3(0f, 0.35f, 0.25f), new Vector3(0.5f, 0.04f, 0.35f), metalMat);
+        foreach (float lx in new[] { -0.22f, 0.22f })
+        foreach (float lz in new[] { 0.1f, 0.4f })
+            Box(trolleyRoot.transform, "Leg", new Vector3(lx, 0.42f, lz), new Vector3(0.03f, 0.85f, 0.03f), metalMat);
+        Box(trolleyRoot.transform, "TrayBox0", new Vector3(-0.12f, 0.9f, 0.25f), new Vector3(0.15f, 0.08f, 0.15f), linenMat);
+        Box(trolleyRoot.transform, "TrayBox1", new Vector3(0.12f, 0.9f, 0.2f), new Vector3(0.12f, 0.06f, 0.12f), linenMat);
+        props.Add(FinishProp(trolleyRoot, folder, PropPiece.MountKind.Wall, 0.55f, 1f));
+
+        GameObject curtainRoot = new GameObject("PrivacyCurtain");
+        Box(curtainRoot.transform, "Rail", new Vector3(0f, 2.2f, 0.15f), new Vector3(1.6f, 0.03f, 0.03f), metalMat);
+        Box(curtainRoot.transform, "BracketL", new Vector3(-0.75f, 2.1f, 0.08f), new Vector3(0.03f, 0.2f, 0.1f), metalMat);
+        Box(curtainRoot.transform, "BracketR", new Vector3(0.75f, 2.1f, 0.08f), new Vector3(0.03f, 0.2f, 0.1f), metalMat);
+        for (int wardI = 0; wardI < 3; wardI++)
+        {
+            float px = -0.5f + wardI * 0.5f;
+            Box(curtainRoot.transform, $"Panel{wardI}", new Vector3(px, 1.25f, 0.15f), new Vector3(0.55f, 1.9f, 0.02f), linenMat).transform.localRotation = Quaternion.Euler(0f, (wardI - 1) * 4f, 0f);
+        }
+        props.Add(FinishProp(curtainRoot, folder, PropPiece.MountKind.Wall, 0.35f, 1f));
+
+        GameObject chartRoot = new GameObject("WallChart");
+        Box(chartRoot.transform, "Clipboard", new Vector3(0f, 1.4f, 0.025f), new Vector3(0.3f, 0.4f, 0.02f), linenMat, keepCollider: true);
+        props.Add(FinishProp(chartRoot, folder, PropPiece.MountKind.Wall, 0.05f, 0.7f));
+
+        Color exitGreen = new Color(0.1f, 0.9f, 0.3f);
+        Material exitSignMat = LoadOrCreateMat(folder, "Ward_ExitSign", exitGreen, null, null, Vector2.one, exitGreen * 1.5f);
+        GameObject exitSignRoot = new GameObject("ExitSign");
+        Box(exitSignRoot.transform, "Sign", new Vector3(0f, -0.15f, 0f), new Vector3(0.35f, 0.15f, 0.05f), exitSignMat, keepCollider: true);
+        CylinderBetween(exitSignRoot.transform, "RodL", new Vector3(-0.12f, 0f, 0f), new Vector3(-0.12f, -0.15f, 0f), 0.01f, metalMat);
+        CylinderBetween(exitSignRoot.transform, "RodR", new Vector3(0.12f, 0f, 0f), new Vector3(0.12f, -0.15f, 0f), 0.01f, metalMat);
+        props.Add(FinishProp(exitSignRoot, folder, PropPiece.MountKind.Ceiling, 0.35f, 1f));
+
+        Material glassShardMat = LoadOrCreateMat(folder, "Ward_GlassShard", glassColor, null, null, Vector2.one, null, smoothness: 0.7f);
+        GameObject brokenGlassRoot = new GameObject("BrokenGlass");
+        System.Random glassRng = new System.Random(301);
+        for (int gi = 0; gi < 8; gi++)
+        {
+            float gx = (float)(glassRng.NextDouble() - 0.5) * 0.35f;
+            float gz = (float)glassRng.NextDouble() * 0.35f;
+            Box(brokenGlassRoot.transform, $"Shard{gi}", new Vector3(gx, 0.005f, gz), new Vector3(0.05f, 0.01f, 0.05f), glassShardMat).transform.localRotation = Quaternion.Euler(0f, (float)glassRng.NextDouble() * 360f, 0f);
+        }
+        props.Add(FinishProp(brokenGlassRoot, folder, PropPiece.MountKind.Floor, 0.3f, 1f));
+
+        GameObject syringesRoot = new GameObject("Syringes");
+        Box(syringesRoot.transform, "Tray", new Vector3(0f, 0.01f, 0.15f), new Vector3(0.2f, 0.01f, 0.1f), metalMat).transform.localRotation = Quaternion.Euler(0f, 0f, 15f);
+        for (int si = 0; si < 3; si++)
+        {
+            CylinderRH(syringesRoot.transform, $"Syringe{si}", new Vector3(-0.1f + si * 0.08f, 0.01f, 0.3f), 0.008f, 0.12f, glassMat).transform.localRotation = Quaternion.Euler(0f, 0f, 85f + si * 3f);
+        }
+        props.Add(FinishProp(syringesRoot, folder, PropPiece.MountKind.Floor, 0.3f, 0.7f));
+
+        props.AddRange(BuildCommonFloorProps());
+
+        CommonDecalMaterials wardCommonDecals = GetCommonDecalMaterials();
+        Material wardGrimeMat = LoadOrCreateDecalMat(folder, "Ward_Grime", EnsureDecalTexture("Decal_Grime"), new Color(0.1f, 0.14f, 0.1f), 0.1f);
+        Material wardDripMat = LoadOrCreateDecalMat(folder, "Ward_Drip", EnsureDecalTexture("Decal_Drip"), new Color(0.14f, 0.16f, 0.12f), 0.15f);
+        Material wardFloorGrimeMat = LoadOrCreateDecalMat(folder, "Ward_FloorGrime", EnsureDecalTexture("Decal_Grime"), new Color(0.1f, 0.11f, 0.1f), 0.1f);
+        props.AddRange(BuildThemeDecals(folder, "Ward", wardCommonDecals, wardGrimeMat, wardDripMat, wardFloorGrimeMat));
+
+        // ---- F70: set pieces (plan section 3.4) ----
+
+        SetPiece BuildWardTriage()
+        {
+            GameObject root = new GameObject("Ward_Triage");
+            GameObject frame = Box(root.transform, "GurneyFrame", new Vector3(0f, 0.35f, 0.75f), new Vector3(0.65f, 1.9f, 0.06f), metalMat, keepCollider: true);
+            frame.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+            Box(root.transform, "Mattress", new Vector3(0f, 0.5f, 0.75f), new Vector3(1.8f, 0.12f, 0.6f), linenMat).transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
+            Sphere(root.transform, "PillowA", new Vector3(-0.6f, 0.1f, 0.5f), new Vector3(0.3f, 0.15f, 0.2f), linenMat);
+            Sphere(root.transform, "PillowB", new Vector3(0.5f, 0.1f, 1.1f), new Vector3(0.28f, 0.14f, 0.2f), linenMat);
+            CreateDecalQuad(root.transform, "BloodSmearDecal", wardCommonDecals.BloodSmear, false, new Vector3(0f, 1.3f, 1.98f), Quaternion.identity, 1.2f);
+            for (int pi = 0; pi < 2; pi++)
+            {
+                Box(root.transform, $"Paper{pi}", new Vector3(-0.3f + pi * 0.6f, 0.01f, 1.6f + pi * 0.3f), new Vector3(0.2f, 0.003f, 0.3f), linenMat).transform.localRotation = Quaternion.Euler(0f, pi * 40f, 0f);
+            }
+            CylinderRH(root.transform, "SyringeA", new Vector3(0.4f, 0.01f, 1.9f), 0.008f, 0.12f, glassMat).transform.localRotation = Quaternion.Euler(0f, 0f, 88f);
+            return FinishSetPiece(root, folder, width: 2.0f, depth: 0.8f, weight: 1f);
+        }
+
+        SetPiece BuildWardIsolation()
+        {
+            GameObject root = new GameObject("Ward_Isolation");
+            Box(root.transform, "RailL", new Vector3(-0.9f, 2.2f, 0.7f), new Vector3(1.5f, 0.03f, 0.03f), metalMat);
+            Box(root.transform, "RailR", new Vector3(0.9f, 2.2f, 0.7f), new Vector3(1.5f, 0.03f, 0.03f), metalMat);
+            for (int ci = 0; ci < 3; ci++)
+            {
+                Box(root.transform, $"CurtainL{ci}", new Vector3(-1.5f + ci * 0.5f, 1.25f, 0.7f), new Vector3(0.55f, 1.9f, 0.02f), linenMat);
+                Box(root.transform, $"CurtainR{ci}", new Vector3(0.3f + ci * 0.5f, 1.25f, 0.7f), new Vector3(0.55f, 1.9f, 0.02f), linenMat);
+            }
+            Box(root.transform, "BedFrame", new Vector3(0f, 0.3f, 0.7f), new Vector3(1.0f, 0.5f, 0.5f), metalMat, keepCollider: true);
+            Box(root.transform, "StrapL", new Vector3(-0.3f, 0.55f, 0.7f), new Vector3(0.4f, 0.03f, 0.05f), linenMat);
+            Box(root.transform, "StrapR", new Vector3(0.3f, 0.55f, 0.7f), new Vector3(0.4f, 0.03f, 0.05f), linenMat);
+            CreateDecalQuad(root.transform, "ClawDecal", wardCommonDecals.Claw, false, new Vector3(0f, 1.4f, 1.98f), Quaternion.identity, 0.7f);
+            return FinishSetPiece(root, folder, width: 3.0f, depth: 0.6f, weight: 1f);
+        }
+
+        List<SetPiece> setPieces = new List<SetPiece>
+        {
+            BuildWardTriage(),
+            BuildWardIsolation(),
+            BuildFallenRunnerSetPiece(wardCommonDecals)
+        };
+
+        DustMotes dust = BuildDustPrefab(folder, "Ward_Dust", new Color(0.8f, 0.8f, 0.75f), 25f, 0.015f, 0.03f);
+
         return new ThemeAssets
         {
             DisplayName = "The Ward",
@@ -514,7 +641,14 @@ public static class FloorThemeBuilder
             CeilingTile = ceilingTile,
             Lamp = lamp,
             Locker = locker,
-            Props = props.ToArray()
+            Props = props.ToArray(),
+            FloorPropChance = 0.3f,
+            WallDecalChance = 0.45f,
+            FloorDecalChance = 0.3f,
+            MaxDecalsPerCell = 2,
+            SetPieces = setPieces.ToArray(),
+            SetPieceCount = 3,
+            Dust = dust
         };
     }
 
@@ -634,6 +768,120 @@ public static class FloorThemeBuilder
         }
         props.Add(FinishProp(rootsRoot, folder, PropPiece.MountKind.Ceiling, 0.8f, 1f));
 
+        // ---- F70: additional props (plan section 3.3, Crypt table) ----
+
+        GameObject sarcRoot = new GameObject("Sarcophagus");
+        Box(sarcRoot.transform, "Body", new Vector3(0f, 0.325f, 0.325f), new Vector3(2.0f, 0.65f, 0.65f), stoneMat, keepCollider: true);
+        Box(sarcRoot.transform, "Lid", new Vector3(0.1f, 0.68f, 0.3f), new Vector3(2.05f, 0.08f, 0.7f), stoneMat).transform.localRotation = Quaternion.Euler(0f, 8f, 0f);
+        props.Add(FinishProp(sarcRoot, folder, PropPiece.MountKind.Wall, 0.7f, 1f));
+
+        GameObject skullNicheRoot = new GameObject("SkullNiche");
+        Box(skullNicheRoot.transform, "Frame", new Vector3(0f, 1.2f, 0.08f), new Vector3(0.5f, 0.5f, 0.16f), ironMat, keepCollider: true);
+        Sphere(skullNicheRoot.transform, "SkullL", new Vector3(-0.1f, 1.2f, 0.14f), Vector3.one * 0.15f, boneMat);
+        Sphere(skullNicheRoot.transform, "SkullR", new Vector3(0.12f, 1.15f, 0.14f), Vector3.one * 0.13f, boneMat);
+        props.Add(FinishProp(skullNicheRoot, folder, PropPiece.MountKind.Wall, 0.2f, 1f));
+
+        GameObject candleClusterRoot = new GameObject("CandleCluster");
+        System.Random candleRng = new System.Random(302);
+        Color candleFlameColor = new Color(1.0f, 0.55f, 0.2f);
+        Material candleFlameMat = LoadOrCreateMat(folder, "Crypt_CandleFlame", candleFlameColor, null, null, Vector2.one, candleFlameColor * 3f);
+        for (int ci = 0; ci < 5; ci++)
+        {
+            float cx = (float)(candleRng.NextDouble() - 0.5) * 0.4f;
+            float cz = (float)candleRng.NextDouble() * 0.35f;
+            float ch = 0.05f + (float)candleRng.NextDouble() * 0.2f;
+            CylinderRH(candleClusterRoot.transform, $"Candle{ci}", new Vector3(cx, ch * 0.5f, cz), 0.02f, ch, boneMat);
+            Sphere(candleClusterRoot.transform, $"Flame{ci}", new Vector3(cx, ch + 0.02f, cz), Vector3.one * 0.025f, candleFlameMat);
+        }
+        props.Add(FinishProp(candleClusterRoot, folder, PropPiece.MountKind.Floor, 0.3f, 1.5f));
+
+        GameObject scatteredBonesRoot = new GameObject("ScatteredBones");
+        System.Random scatterBoneRng = new System.Random(303);
+        for (int bi = 0; bi < 6; bi++)
+        {
+            float bx = (float)(scatterBoneRng.NextDouble() - 0.5) * 0.4f;
+            float bz = (float)scatterBoneRng.NextDouble() * 0.4f;
+            Capsule(scatteredBonesRoot.transform, $"Bone{bi}", new Vector3(bx, 0.02f, bz), new Vector3(0.03f, 0.14f, 0.03f), boneMat).transform.localRotation = Quaternion.Euler(80f, (float)scatterBoneRng.NextDouble() * 360f, 0f);
+        }
+        Sphere(scatteredBonesRoot.transform, "Skull", new Vector3(0.1f, 0.06f, 0.3f), Vector3.one * 0.12f, boneMat);
+        props.Add(FinishProp(scatteredBonesRoot, folder, PropPiece.MountKind.Floor, 0.4f, 1f));
+
+        Material cobwebMat = LoadOrCreateDecalMat(folder, "Crypt_Cobweb", EnsureDecalTexture("Decal_Grime"), new Color(0.5f, 0.5f, 0.48f), 0.05f);
+        GameObject cobwebRoot = new GameObject("Cobweb");
+        for (int wi = 0; wi < 4; wi++)
+        {
+            CreateDecalQuad(cobwebRoot.transform, $"Strand{wi}", cobwebMat, true, new Vector3(0f, -0.05f, 0f), Quaternion.Euler(0f, wi * 45f, 0f), 0.5f);
+        }
+        props.Add(FinishProp(cobwebRoot, folder, PropPiece.MountKind.Ceiling, 0.5f, 1f));
+
+        props.AddRange(BuildCommonFloorProps());
+
+        CommonDecalMaterials cryptCommonDecals = GetCommonDecalMaterials();
+        Material cryptGrimeMat = LoadOrCreateDecalMat(folder, "Crypt_Grime", EnsureDecalTexture("Decal_Grime"), new Color(0.08f, 0.1f, 0.06f), 0.05f);
+        Material cryptDripMat = LoadOrCreateDecalMat(folder, "Crypt_Drip", EnsureDecalTexture("Decal_Drip"), new Color(0.1f, 0.12f, 0.07f), 0.1f);
+        Material cryptFloorGrimeMat = LoadOrCreateDecalMat(folder, "Crypt_FloorGrime", EnsureDecalTexture("Decal_Grime"), new Color(0.07f, 0.09f, 0.05f), 0.05f);
+        props.AddRange(BuildThemeDecals(folder, "Crypt", cryptCommonDecals, cryptGrimeMat, cryptDripMat, cryptFloorGrimeMat));
+
+        // ---- F70: set pieces (plan section 3.4) ----
+
+        SetPiece BuildCryptShrine()
+        {
+            GameObject root = new GameObject("Crypt_Shrine");
+            Box(root.transform, "Altar", new Vector3(0f, 0.4f, 0.4f), new Vector3(1.6f, 0.8f, 0.6f), stoneMat, keepCollider: true);
+            System.Random shrineRng = new System.Random(304);
+            for (int ci = 0; ci < 7; ci++)
+            {
+                float cx = -0.6f + ci * 0.2f;
+                float ch = 0.08f + (float)shrineRng.NextDouble() * 0.15f;
+                CylinderRH(root.transform, $"Candle{ci}", new Vector3(cx, 0.8f + ch * 0.5f, 0.4f), 0.025f, ch, boneMat);
+                Sphere(root.transform, $"Flame{ci}", new Vector3(cx, 0.8f + ch + 0.02f, 0.4f), Vector3.one * 0.03f, candleFlameMat);
+            }
+            Sphere(root.transform, "SkullA", new Vector3(-0.5f, 0.86f, 0.6f), Vector3.one * 0.14f, boneMat);
+            Sphere(root.transform, "SkullB", new Vector3(0f, 0.86f, 0.6f), Vector3.one * 0.14f, boneMat);
+            Sphere(root.transform, "SkullC", new Vector3(0.5f, 0.86f, 0.6f), Vector3.one * 0.14f, boneMat);
+            CreateDecalQuad(root.transform, "DripDecal", cryptCommonDecals.BloodPool, false, new Vector3(0f, 2.1f, 1.98f), Quaternion.identity, 0.9f);
+
+            GameObject lightGo = new GameObject("Light");
+            lightGo.transform.SetParent(root.transform, false);
+            lightGo.transform.localPosition = new Vector3(0f, 1.1f, 0.4f);
+            Light shrineLight = lightGo.AddComponent<Light>();
+            shrineLight.type = LightType.Point;
+            shrineLight.range = 3.5f;
+            shrineLight.intensity = 0.7f;
+            shrineLight.color = candleFlameColor;
+            shrineLight.shadows = LightShadows.None;
+            ConfigureFlicker(root, FlickerLight.FlickerMode.Candle, shrineLight, null);
+
+            return FinishSetPiece(root, folder, width: 1.6f, depth: 0.9f, weight: 1f);
+        }
+
+        SetPiece BuildCryptCollapse()
+        {
+            GameObject root = new GameObject("Crypt_Collapse");
+            System.Random collapseRng = new System.Random(305);
+            for (int ri = 0; ri < 12; ri++)
+            {
+                float rx = (float)(collapseRng.NextDouble() - 0.5) * 2.6f;
+                float ry = 0.1f + (float)collapseRng.NextDouble() * 0.3f;
+                float rz = (float)collapseRng.NextDouble() * 0.7f;
+                float rs = 0.15f + (float)collapseRng.NextDouble() * 0.25f;
+                Box(root.transform, $"Rubble{ri}", new Vector3(rx, ry, rz), Vector3.one * rs, stoneMat, keepCollider: ri < 3).transform.localRotation = Quaternion.Euler(0f, (float)collapseRng.NextDouble() * 360f, 0f);
+            }
+            GameObject beam = Box(root.transform, "Beam", new Vector3(0.3f, 1.2f, 0.4f), new Vector3(2.6f, 0.25f, 0.25f), woodMat, keepCollider: true);
+            beam.transform.localRotation = Quaternion.Euler(0f, 0f, 22f);
+            CreateDecalQuad(root.transform, "DustDecal", cryptCommonDecals.DragMarks, true, new Vector3(0f, 0.006f, 0.4f), Quaternion.identity, 1.6f);
+            return FinishSetPiece(root, folder, width: 2.8f, depth: 0.85f, weight: 1f);
+        }
+
+        List<SetPiece> setPieces = new List<SetPiece>
+        {
+            BuildCryptShrine(),
+            BuildCryptCollapse(),
+            BuildFallenRunnerSetPiece(cryptCommonDecals)
+        };
+
+        DustMotes dust = BuildDustPrefab(folder, "Crypt_Dust", new Color(0.7f, 0.68f, 0.6f), 50f, 0.015f, 0.03f);
+
         return new ThemeAssets
         {
             DisplayName = "The Crypt",
@@ -651,7 +899,14 @@ public static class FloorThemeBuilder
             CeilingTile = ceilingTile,
             Lamp = lamp,
             Locker = locker,
-            Props = props.ToArray()
+            Props = props.ToArray(),
+            FloorPropChance = 0.35f,
+            WallDecalChance = 0.5f,
+            FloorDecalChance = 0.35f,
+            MaxDecalsPerCell = 2,
+            SetPieces = setPieces.ToArray(),
+            SetPieceCount = 3,
+            Dust = dust
         };
     }
 
@@ -764,6 +1019,114 @@ public static class FloorThemeBuilder
         CylinderRH(steamRoot.transform, "Wheel", new Vector3(0f, -0.6f, 0f), 0.15f, 0.04f, rustMat).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
         props.Add(FinishProp(steamRoot, folder, PropPiece.MountKind.Ceiling, 0.6f, 1f));
 
+        // ---- F70: additional props (plan section 3.3, Boiler Deck table) ----
+
+        GameObject gaugeRoot = new GameObject("PressureGauge");
+        CylinderRH(gaugeRoot.transform, "Pipe", new Vector3(0f, 0f, 0.06f), 0.03f, 0.12f, rustMat).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+        CylinderRH(gaugeRoot.transform, "Face", new Vector3(0f, 0f, 0.14f), 0.14f, 0.03f, ironMat).transform.localRotation = Quaternion.Euler(90f, 0f, 0f);
+        Box(gaugeRoot.transform, "Needle", new Vector3(0.03f, 0.03f, 0.16f), new Vector3(0.09f, 0.015f, 0.01f), rustMat).transform.localRotation = Quaternion.Euler(0f, 0f, 30f);
+        props.Add(FinishProp(gaugeRoot, folder, PropPiece.MountKind.Wall, 0.2f, 1f));
+
+        GameObject fuseBoxRoot = new GameObject("FuseBox");
+        Box(fuseBoxRoot.transform, "Box", new Vector3(0f, 0f, 0.1f), new Vector3(0.5f, 0.7f, 0.2f), ironMat, keepCollider: true);
+        Box(fuseBoxRoot.transform, "Door", new Vector3(-0.15f, 0f, 0.21f), new Vector3(0.28f, 0.65f, 0.03f), ironMat).transform.localRotation = Quaternion.Euler(0f, 40f, 0f);
+        CylinderBetween(fuseBoxRoot.transform, "Cable", new Vector3(0.15f, -0.35f, 0.15f), new Vector3(0.1f, -1.0f, 0.1f), 0.015f, ironMat);
+        props.Add(FinishProp(fuseBoxRoot, folder, PropPiece.MountKind.Wall, 0.3f, 1f));
+
+        GameObject pipeClusterRoot = new GameObject("PipeCluster");
+        foreach (float px in new[] { -0.15f, 0f, 0.15f })
+        {
+            CylinderBetween(pipeClusterRoot.transform, $"Pipe{px}", new Vector3(px, 0f, 0.1f), new Vector3(px, 2.8f, 0.1f), 0.05f, rustMat, keepCollider: px == 0f);
+        }
+        Box(pipeClusterRoot.transform, "FlangeTop", new Vector3(0f, 2.8f, 0.1f), new Vector3(0.45f, 0.04f, 0.2f), ironMat);
+        Box(pipeClusterRoot.transform, "FlangeBottom", new Vector3(0f, 0f, 0.1f), new Vector3(0.45f, 0.04f, 0.2f), ironMat);
+        props.Add(FinishProp(pipeClusterRoot, folder, PropPiece.MountKind.Wall, 0.35f, 1f));
+
+        GameObject hooksRoot = new GameObject("HangingHooks");
+        System.Random hookRng = new System.Random(306);
+        for (int hi = 0; hi < 3; hi++)
+        {
+            float hx = -0.4f + hi * 0.4f;
+            float len = 0.6f + (float)hookRng.NextDouble() * 0.6f;
+            CylinderBetween(hooksRoot.transform, $"Chain{hi}", new Vector3(hx, 0f, 0f), new Vector3(hx, -len, 0f), 0.015f, ironMat, keepCollider: hi == 0);
+            Box(hooksRoot.transform, $"Hook{hi}", new Vector3(hx, -len - 0.04f, 0f), new Vector3(0.06f, 0.08f, 0.02f), rustMat);
+        }
+        props.Add(FinishProp(hooksRoot, folder, PropPiece.MountKind.Ceiling, 1.2f, 1f));
+
+        GameObject coalPileRoot = new GameObject("CoalPile");
+        System.Random coalRng = new System.Random(307);
+        for (int ki = 0; ki < 10; ki++)
+        {
+            float kx = (float)(coalRng.NextDouble() - 0.5) * 0.4f;
+            float kz = (float)coalRng.NextDouble() * 0.35f;
+            float ks = 0.08f + (float)coalRng.NextDouble() * 0.12f;
+            Sphere(coalPileRoot.transform, $"Chunk{ki}", new Vector3(kx, ks * 0.4f, kz), Vector3.one * ks, ironMat);
+        }
+        props.Add(FinishProp(coalPileRoot, folder, PropPiece.MountKind.Floor, 0.4f, 1f));
+
+        GameObject oilCanRoot = new GameObject("OilCan");
+        CylinderRH(oilCanRoot.transform, "Can", new Vector3(0f, 0.06f, 0.15f), 0.06f, 0.16f, rustMat).transform.localRotation = Quaternion.Euler(0f, 0f, 75f);
+        CylinderRH(oilCanRoot.transform, "Puddle", new Vector3(0.1f, 0.002f, 0.25f), 0.12f, 0.004f, ironMat);
+        props.Add(FinishProp(oilCanRoot, folder, PropPiece.MountKind.Floor, 0.3f, 0.7f));
+
+        props.AddRange(BuildCommonFloorProps());
+
+        CommonDecalMaterials boilerCommonDecals = GetCommonDecalMaterials();
+        Material boilerGrimeMat = LoadOrCreateDecalMat(folder, "Boiler_Grime", EnsureDecalTexture("Decal_Grime"), new Color(0.05f, 0.04f, 0.03f), 0.2f);
+        Material boilerDripMat = LoadOrCreateDecalMat(folder, "Boiler_Drip", EnsureDecalTexture("Decal_Drip"), new Color(0.08f, 0.05f, 0.02f), 0.3f);
+        Material boilerFloorGrimeMat = LoadOrCreateDecalMat(folder, "Boiler_FloorGrime", EnsureDecalTexture("Decal_Grime"), new Color(0.04f, 0.03f, 0.02f), 0.9f);
+        props.AddRange(BuildThemeDecals(folder, "Boiler", boilerCommonDecals, boilerGrimeMat, boilerDripMat, boilerFloorGrimeMat));
+
+        // ---- F70: set pieces (plan section 3.4) ----
+
+        SetPiece BuildBoilerBurst()
+        {
+            GameObject root = new GameObject("Boiler_Burst");
+            GameObject pipeDown = CylinderBetween(root.transform, "PipeDown", new Vector3(0f, 3.9f, 0.2f), new Vector3(0.2f, 2.6f, 0.3f), 0.12f, rustMat, keepCollider: true);
+            _ = pipeDown;
+            GameObject pipeBend = CylinderBetween(root.transform, "PipeBend", new Vector3(0.2f, 2.6f, 0.3f), new Vector3(0.5f, 2.1f, 0.4f), 0.1f, rustMat, keepCollider: true);
+            _ = pipeBend;
+            AddLocalParticles(root.transform, folder, "Boiler_Burst_Steam", new Color(0.9f, 0.9f, 0.9f), 12f, 1.5f, 2.5f, 0.3f, 0.6f, 0.9f, new Vector3(0.3f, 0.1f, 0.3f));
+            Material puddleMat = LoadOrCreateDecalMat(folder, "Boiler_BurstPuddle", EnsureDecalTexture("Decal_Grime"), new Color(0.04f, 0.03f, 0.02f), 0.9f);
+            CreateDecalQuad(root.transform, "PuddleDecal", puddleMat, true, new Vector3(0.3f, 0.006f, 0.5f), Quaternion.identity, 1.6f);
+            return FinishSetPiece(root, folder, width: 1.4f, depth: 0.7f, weight: 1f);
+        }
+
+        SetPiece BuildBoilerSparks()
+        {
+            GameObject root = new GameObject("Boiler_Sparks");
+            Box(root.transform, "FuseBoxOpen", new Vector3(0f, 1.6f, 0.1f), new Vector3(0.5f, 0.7f, 0.2f), ironMat, keepCollider: true);
+            Box(root.transform, "DoorAjar", new Vector3(-0.2f, 1.6f, 0.22f), new Vector3(0.25f, 0.65f, 0.03f), ironMat).transform.localRotation = Quaternion.Euler(0f, 55f, 0f);
+            CylinderBetween(root.transform, "DanglingCable", new Vector3(0.15f, 1.25f, 0.18f), new Vector3(0.1f, 0.3f, 0.15f), 0.015f, ironMat);
+            Color sparkColor = new Color(1.0f, 0.75f, 0.2f);
+            AddLocalParticles(root.transform, folder, "Boiler_Sparks_FX", sparkColor, 3f, 0.15f, 0.35f, 0.02f, 0.04f, 1.5f, new Vector3(0.05f, 0.05f, 0.05f));
+
+            GameObject lightGo = new GameObject("Light");
+            lightGo.transform.SetParent(root.transform, false);
+            lightGo.transform.localPosition = new Vector3(0.1f, 1.3f, 0.2f);
+            Light sparkLight = lightGo.AddComponent<Light>();
+            sparkLight.type = LightType.Point;
+            sparkLight.range = 3f;
+            sparkLight.intensity = 0.7f;
+            sparkLight.color = sparkColor;
+            sparkLight.shadows = LightShadows.None;
+            ConfigureFlicker(root, FlickerLight.FlickerMode.Spark, sparkLight, null);
+
+            Material scorchMat = LoadOrCreateDecalMat(folder, "Boiler_Scorch", EnsureDecalTexture("Decal_Grime"), new Color(0.02f, 0.02f, 0.02f), 0.05f);
+            CreateDecalQuad(root.transform, "ScorchDecal", scorchMat, false, new Vector3(0f, 1.2f, 0.21f), Quaternion.identity, 0.9f);
+            return FinishSetPiece(root, folder, width: 1.2f, depth: 0.4f, weight: 1f);
+        }
+
+        List<SetPiece> setPieces = new List<SetPiece>
+        {
+            BuildBoilerBurst(),
+            BuildBoilerSparks(),
+            BuildFallenRunnerSetPiece(boilerCommonDecals)
+        };
+
+        DustMotes dust = BuildDustPrefab(folder, "Boiler_Dust", new Color(0.6f, 0.5f, 0.4f), 35f, 0.015f, 0.03f,
+            extraChildren: dustRoot => AddLocalParticles(dustRoot.transform, folder, "Boiler_Embers", new Color(1.0f, 0.55f, 0.2f), 1.5f, 4f, 7f, 0.01f, 0.01f, 0.2f, new Vector3(7f, 3f, 7f)));
+
         return new ThemeAssets
         {
             DisplayName = "Boiler Deck",
@@ -781,7 +1144,14 @@ public static class FloorThemeBuilder
             CeilingTile = ceilingTile,
             Lamp = lamp,
             Locker = locker,
-            Props = props.ToArray()
+            Props = props.ToArray(),
+            FloorPropChance = 0.3f,
+            WallDecalChance = 0.45f,
+            FloorDecalChance = 0.3f,
+            MaxDecalsPerCell = 2,
+            SetPieces = setPieces.ToArray(),
+            SetPieceCount = 3,
+            Dust = dust
         };
     }
 
@@ -895,6 +1265,133 @@ public static class FloorThemeBuilder
         }
         props.Add(FinishProp(fanRoot, folder, PropPiece.MountKind.Ceiling, 0.3f, 1f));
 
+        // ---- F70: additional props (plan section 3.3, Lab table) ----
+
+        GameObject shelfRoot = new GameObject("SpecimenShelf");
+        Box(shelfRoot.transform, "Frame", new Vector3(0f, 1.2f, 0.2f), new Vector3(1.2f, 1.6f, 0.35f), metalMat, keepCollider: true);
+        Color jarColor = new Color(0.15f, 0.35f, 0.2f);
+        Material jarMat = LoadOrCreateMat(folder, "Lab_Jar", jarColor, null, null, Vector2.one, jarColor * 0.4f, smoothness: 0.7f);
+        for (int shelfY = 0; shelfY < 3; shelfY++)
+        for (int shelfX = 0; shelfX < 2; shelfX++)
+        {
+            float jx = -0.35f + shelfX * 0.7f;
+            float jy = 0.6f + shelfY * 0.55f;
+            CylinderRH(shelfRoot.transform, $"Jar{shelfY}_{shelfX}", new Vector3(jx, jy, 0.3f), 0.12f, 0.25f, jarMat);
+        }
+        props.Add(FinishProp(shelfRoot, folder, PropPiece.MountKind.Wall, 0.45f, 1f));
+
+        GameObject whiteboardRoot = new GameObject("Whiteboard");
+        Material whiteboardMat = LoadOrCreateMat(folder, "Lab_Whiteboard", new Color(0.85f, 0.85f, 0.85f), null, null, Vector2.one, null);
+        Box(whiteboardRoot.transform, "Board", new Vector3(0f, 1.5f, 0.04f), new Vector3(1.6f, 1.0f, 0.02f), whiteboardMat, keepCollider: true);
+        System.Random scribbleRng = new System.Random(308);
+        for (int scI = 0; scI < 5; scI++)
+        {
+            float sx = (float)(scribbleRng.NextDouble() - 0.5) * 1.3f;
+            float sy = 1.2f + (float)scribbleRng.NextDouble() * 0.6f;
+            Box(whiteboardRoot.transform, $"Scribble{scI}", new Vector3(sx, sy, 0.06f), new Vector3(0.3f, 0.02f, 0.005f), metalMat).transform.localRotation = Quaternion.Euler(0f, 0f, (float)scribbleRng.NextDouble() * 40f - 20f);
+        }
+        props.Add(FinishProp(whiteboardRoot, folder, PropPiece.MountKind.Wall, 0.08f, 1f));
+
+        Color biohazardYellow = new Color(0.85f, 0.7f, 0.05f);
+        Material biohazardMat = LoadOrCreateMat(folder, "Lab_Biohazard", biohazardYellow, null, null, Vector2.one, null);
+        GameObject drumRoot = new GameObject("BiohazardDrum");
+        CylinderRH(drumRoot.transform, "Body", new Vector3(0f, 0.45f, 0.3f), 0.3f, 0.9f, biohazardMat, keepCollider: true);
+        Box(drumRoot.transform, "Band", new Vector3(0f, 0.5f, 0.3f), new Vector3(0.62f, 0.08f, 0.62f), metalMat);
+        props.Add(FinishProp(drumRoot, folder, PropPiece.MountKind.Wall, 0.6f, 1f));
+
+        GameObject brokenLampRoot = new GameObject("BrokenCeilingLamp");
+        CylinderBetween(brokenLampRoot.transform, "CableA", new Vector3(-0.15f, 0f, 0f), new Vector3(-0.1f, -0.7f, 0.05f), 0.01f, metalMat, keepCollider: true);
+        Box(brokenLampRoot.transform, "Housing", new Vector3(-0.1f, -0.75f, 0.05f), new Vector3(0.35f, 0.1f, 0.12f), metalMat).transform.localRotation = Quaternion.Euler(0f, 0f, 20f);
+        props.Add(FinishProp(brokenLampRoot, folder, PropPiece.MountKind.Ceiling, 0.8f, 1f));
+
+        Material labGlassShardMat = LoadOrCreateMat(folder, "Lab_GlassShard", new Color(0.6f, 0.9f, 0.7f), null, null, Vector2.one, null, smoothness: 0.7f);
+        GameObject labGlassRoot = new GameObject("GlassShards");
+        System.Random labGlassRng = new System.Random(309);
+        for (int lgi = 0; lgi < 8; lgi++)
+        {
+            float gx = (float)(labGlassRng.NextDouble() - 0.5) * 0.35f;
+            float gz = (float)labGlassRng.NextDouble() * 0.35f;
+            Box(labGlassRoot.transform, $"Shard{lgi}", new Vector3(gx, 0.005f, gz), new Vector3(0.05f, 0.01f, 0.05f), labGlassShardMat).transform.localRotation = Quaternion.Euler(0f, (float)labGlassRng.NextDouble() * 360f, 0f);
+        }
+        props.Add(FinishProp(labGlassRoot, folder, PropPiece.MountKind.Floor, 0.3f, 1f));
+
+        GameObject clipboardPileRoot = new GameObject("ClipboardPile");
+        Box(clipboardPileRoot.transform, "Board0", new Vector3(-0.05f, 0.01f, 0.15f), new Vector3(0.22f, 0.015f, 0.3f), metalMat).transform.localRotation = Quaternion.Euler(0f, 15f, 0f);
+        Box(clipboardPileRoot.transform, "Board1", new Vector3(0.05f, 0.025f, 0.2f), new Vector3(0.22f, 0.015f, 0.3f), metalMat).transform.localRotation = Quaternion.Euler(0f, -10f, 0f);
+        Box(clipboardPileRoot.transform, "Board2", new Vector3(0f, 0.04f, 0.1f), new Vector3(0.2f, 0.003f, 0.28f), screenMat).transform.localRotation = Quaternion.Euler(0f, 25f, 0f);
+        props.Add(FinishProp(clipboardPileRoot, folder, PropPiece.MountKind.Floor, 0.3f, 1f));
+
+        props.AddRange(BuildCommonFloorProps());
+
+        CommonDecalMaterials labCommonDecals = GetCommonDecalMaterials();
+        Material labGrimeMat = LoadOrCreateDecalMat(folder, "Lab_Grime", EnsureDecalTexture("Decal_Grime"), new Color(0.1f, 0.15f, 0.13f), 0.2f);
+        Material labDripMat = LoadOrCreateDecalMat(folder, "Lab_Drip", EnsureDecalTexture("Decal_Drip"), new Color(0.1f, 0.3f, 0.15f), 0.4f);
+        Material labFloorGrimeMat = LoadOrCreateDecalMat(folder, "Lab_FloorGrime", EnsureDecalTexture("Decal_Grime"), new Color(0.08f, 0.09f, 0.09f), 0.2f);
+        // Lab halves blood weights: clean-room with rare violence (decision, plan section 3.2).
+        props.AddRange(BuildThemeDecals(folder, "Lab", labCommonDecals, labGrimeMat, labDripMat, labFloorGrimeMat, bloodWeightScale: 0.5f));
+
+        // ---- F70: set pieces (plan section 3.4) ----
+
+        SetPiece BuildLabContainment()
+        {
+            GameObject root = new GameObject("Lab_Containment");
+            foreach (float px in new[] { -0.5f, 0.5f })
+            foreach (float pz in new[] { 0.15f, 0.65f })
+                Box(root.transform, $"Post_{px}_{pz}", new Vector3(px, 0.9f, pz), new Vector3(0.06f, 1.8f, 0.06f), metalMat, keepCollider: true);
+            Box(root.transform, "Base", new Vector3(0f, 0.05f, 0.4f), new Vector3(1.2f, 0.1f, 0.7f), metalMat, keepCollider: true);
+            System.Random panelRng = new System.Random(310);
+            for (int pnI = 0; pnI < 3; pnI++)
+            {
+                float px = -0.4f + pnI * 0.4f;
+                Box(root.transform, $"GlassPanel{pnI}", new Vector3(px, 0.02f, 0.5f + (float)panelRng.NextDouble() * 0.2f), new Vector3(0.5f, 0.01f, 0.3f), labGlassShardMat).transform.localRotation = Quaternion.Euler(0f, (float)panelRng.NextDouble() * 30f, 0f);
+            }
+            Color puddleGreen = new Color(0.1f, 0.8f, 0.3f);
+            Material puddleMat = LoadOrCreateMat(folder, "Lab_ContainmentPuddle", puddleGreen, null, null, Vector2.one, puddleGreen * 0.5f);
+            CreateDecalQuad(root.transform, "PuddleDecal", puddleMat, true, new Vector3(0f, 0.006f, 0.4f), Quaternion.identity, 1.4f);
+
+            GameObject lightGo = new GameObject("Light");
+            lightGo.transform.SetParent(root.transform, false);
+            lightGo.transform.localPosition = new Vector3(0f, 0.3f, 0.4f);
+            Light containmentLight = lightGo.AddComponent<Light>();
+            containmentLight.type = LightType.Point;
+            containmentLight.range = 3f;
+            containmentLight.intensity = 0.5f;
+            containmentLight.color = puddleGreen;
+            containmentLight.shadows = LightShadows.None;
+            ConfigureFlicker(root, FlickerLight.FlickerMode.Faulty, containmentLight, null);
+
+            return FinishSetPiece(root, folder, width: 1.2f, depth: 0.7f, weight: 1f);
+        }
+
+        SetPiece BuildLabDesk()
+        {
+            GameObject root = new GameObject("Lab_Desk");
+            Box(root.transform, "DeskTop", new Vector3(0f, 0.75f, 0.35f), new Vector3(1.4f, 0.05f, 0.6f), metalMat, keepCollider: true);
+            foreach (float lx in new[] { -0.6f, 0.6f })
+                Box(root.transform, "Leg", new Vector3(lx, 0.37f, 0.6f), new Vector3(0.05f, 0.75f, 0.05f), metalMat);
+            GameObject chair = Box(root.transform, "ChairSeat", new Vector3(0.7f, 0.2f, 1.1f), new Vector3(0.4f, 0.05f, 0.4f), metalMat, keepCollider: true);
+            chair.transform.localRotation = Quaternion.Euler(0f, 20f, 70f);
+            GameObject crt = Box(root.transform, "CRT", new Vector3(-0.3f, 0.95f, 0.35f), new Vector3(0.4f, 0.35f, 0.4f), metalMat, keepCollider: true);
+            Color crtGlowColor = new Color(0.6f, 0.75f, 0.9f);
+            Material crtGlowMat = LoadOrCreateMat(folder, "Lab_CRTGlow", crtGlowColor, null, null, Vector2.one, crtGlowColor * 1.5f);
+            GameObject crtScreen = Box(root.transform, "CRTScreen", new Vector3(-0.3f, 0.95f, 0.56f), new Vector3(0.3f, 0.25f, 0.02f), crtGlowMat);
+            Renderer crtRenderer = crtScreen.GetComponent<Renderer>();
+            _ = crt;
+            for (int pI = 0; pI < 3; pI++)
+                Box(root.transform, $"Paper{pI}", new Vector3(0.3f + pI * 0.05f, 0.78f, 0.2f + pI * 0.1f), new Vector3(0.2f, 0.003f, 0.28f), screenMat).transform.localRotation = Quaternion.Euler(0f, pI * 12f, 0f);
+            ConfigureFlicker(root, FlickerLight.FlickerMode.Faulty, null, crtRenderer);
+            return FinishSetPiece(root, folder, width: 1.6f, depth: 0.8f, weight: 1f);
+        }
+
+        List<SetPiece> setPieces = new List<SetPiece>
+        {
+            BuildLabContainment(),
+            BuildLabDesk(),
+            BuildFallenRunnerSetPiece(labCommonDecals)
+        };
+
+        DustMotes dust = BuildDustPrefab(folder, "Lab_Dust", new Color(0.85f, 0.9f, 0.9f), 12f, 0.015f, 0.03f);
+
         return new ThemeAssets
         {
             DisplayName = "The Lab",
@@ -912,7 +1409,14 @@ public static class FloorThemeBuilder
             CeilingTile = ceilingTile,
             Lamp = lamp,
             Locker = locker,
-            Props = props.ToArray()
+            Props = props.ToArray(),
+            FloorPropChance = 0.22f,
+            WallDecalChance = 0.35f,
+            FloorDecalChance = 0.2f,
+            MaxDecalsPerCell = 2,
+            SetPieces = setPieces.ToArray(),
+            SetPieceCount = 3,
+            Dust = dust
         };
     }
 
@@ -1003,6 +1507,148 @@ public static class FloorThemeBuilder
         CylinderRH(bellRoot.transform, "Body", new Vector3(0f, -0.15f, 0f), 0.2f, 0.3f, woodMat, keepCollider: true);
         props.Add(FinishProp(bellRoot, folder, PropPiece.MountKind.Ceiling, 0.6f, 1f));
 
+        // ---- F70: additional props (plan section 3.3, Hollow table) ----
+
+        GameObject rockingChairRoot = new GameObject("RockingChair");
+        Box(rockingChairRoot.transform, "Seat", new Vector3(0f, 0.45f, 0.3f), new Vector3(0.5f, 0.06f, 0.5f), woodMat, keepCollider: true);
+        Box(rockingChairRoot.transform, "Back", new Vector3(0f, 0.8f, 0.05f), new Vector3(0.5f, 0.7f, 0.05f), woodMat);
+        foreach (float lx in new[] { -0.22f, 0.22f })
+        {
+            GameObject rocker = Box(rockingChairRoot.transform, "Rocker", new Vector3(lx, 0.08f, 0.3f), new Vector3(0.04f, 0.03f, 0.6f), woodMat);
+            rocker.transform.localRotation = Quaternion.Euler(6f, 0f, 0f);
+        }
+        props.Add(FinishProp(rockingChairRoot, folder, PropPiece.MountKind.Wall, 0.7f, 1f));
+
+        GameObject totemRoot = new GameObject("StickTotem");
+        System.Random totemRng = new System.Random(311);
+        for (int stI = 0; stI < 3; stI++)
+        {
+            float ty = 1.2f + stI * 0.3f;
+            CylinderBetween(totemRoot.transform, $"Stick{stI}", new Vector3(-0.15f, ty - 0.15f, 0.03f), new Vector3(0.15f, ty + 0.15f, 0.03f), 0.015f, woodMat, keepCollider: stI == 0);
+        }
+        Box(totemRoot.transform, "ClothStrip", new Vector3(0f, 1.1f, 0.04f), new Vector3(0.1f, 0.3f, 0.01f), clothMat);
+        _ = totemRng;
+        props.Add(FinishProp(totemRoot, folder, PropPiece.MountKind.Wall, 0.25f, 1f));
+
+        GameObject photoFramesRoot = new GameObject("PhotoFrames");
+        System.Random frameRng = new System.Random(312);
+        for (int fI = 0; fI < 4; fI++)
+        {
+            float fx = -0.5f + fI * 0.35f;
+            float fy = 1.3f + (float)frameRng.NextDouble() * 0.6f;
+            Box(photoFramesRoot.transform, $"FrameBorder{fI}", new Vector3(fx, fy, 0.02f), new Vector3(0.18f, 0.22f, 0.02f), woodMat).transform.localRotation = Quaternion.Euler(0f, 0f, (float)frameRng.NextDouble() * 20f - 10f);
+            Box(photoFramesRoot.transform, $"FrameInner{fI}", new Vector3(fx, fy, 0.035f), new Vector3(0.13f, 0.17f, 0.01f), clothMat);
+        }
+        props.Add(FinishProp(photoFramesRoot, folder, PropPiece.MountKind.Wall, 0.06f, 1.5f));
+
+        Color lanternGlow = new Color(0.9f, 0.7f, 0.35f);
+        Material lanternMat = LoadOrCreateMat(folder, "Hollow_Lantern", lanternGlow, null, null, Vector2.one, lanternGlow * 1.2f);
+        GameObject lanternRoot = new GameObject("Lantern");
+        CylinderBetween(lanternRoot.transform, "Chain", new Vector3(0f, 0f, 0f), new Vector3(0f, -0.6f, 0f), 0.01f, woodMat, keepCollider: true);
+        Box(lanternRoot.transform, "Cage", new Vector3(0f, -0.75f, 0f), new Vector3(0.2f, 0.25f, 0.2f), woodMat);
+        Sphere(lanternRoot.transform, "Core", new Vector3(0f, -0.75f, 0f), Vector3.one * 0.12f, lanternMat);
+        props.Add(FinishProp(lanternRoot, folder, PropPiece.MountKind.Ceiling, 0.9f, 1f));
+
+        GameObject dollRoot = new GameObject("Doll");
+        Sphere(dollRoot.transform, "Head", new Vector3(0f, 0.32f, 0.15f), Vector3.one * 0.1f, clothMat);
+        Capsule(dollRoot.transform, "Body", new Vector3(0f, 0.18f, 0.15f), new Vector3(0.15f, 0.14f, 0.15f), clothMat).transform.localRotation = Quaternion.Euler(20f, 0f, 0f);
+        foreach (float lx in new[] { -0.08f, 0.08f })
+            Capsule(dollRoot.transform, "Arm", new Vector3(lx, 0.12f, 0.18f), new Vector3(0.03f, 0.1f, 0.03f), clothMat);
+        foreach (float lx in new[] { -0.05f, 0.05f })
+            Capsule(dollRoot.transform, "Leg", new Vector3(lx, 0.04f, 0.22f), new Vector3(0.03f, 0.09f, 0.03f), clothMat);
+        props.Add(FinishProp(dollRoot, folder, PropPiece.MountKind.Floor, 0.3f, 1f));
+
+        GameObject clothNestRoot = new GameObject("ClothNest");
+        System.Random nestRng = new System.Random(313);
+        for (int nI = 0; nI < 5; nI++)
+        {
+            float nx = (float)(nestRng.NextDouble() - 0.5) * 0.4f;
+            float nz = (float)nestRng.NextDouble() * 0.4f;
+            Sphere(clothNestRoot.transform, $"Wad{nI}", new Vector3(nx, 0.04f, nz), new Vector3(0.2f, 0.06f, 0.2f), clothMat);
+        }
+        props.Add(FinishProp(clothNestRoot, folder, PropPiece.MountKind.Floor, 0.45f, 1f));
+
+        props.AddRange(BuildCommonFloorProps());
+
+        // Hollow doubles Handprint/ClawMarks weight (decision, plan section 3.2).
+        CommonDecalMaterials hollowCommonDecals = GetCommonDecalMaterials();
+        Material hollowGrimeMat = LoadOrCreateDecalMat(folder, "Hollow_Grime", EnsureDecalTexture("Decal_Grime"), new Color(0.03f, 0.03f, 0.035f), 0.05f);
+        Material hollowDripMat = LoadOrCreateDecalMat(folder, "Hollow_Drip", EnsureDecalTexture("Decal_Drip"), new Color(0.05f, 0.02f, 0.02f), 0.1f);
+        Material hollowFloorGrimeMat = LoadOrCreateDecalMat(folder, "Hollow_FloorGrime", EnsureDecalTexture("Decal_Grime"), new Color(0.02f, 0.02f, 0.025f), 0.05f);
+        props.AddRange(BuildThemeDecals(folder, "Hollow", hollowCommonDecals, hollowGrimeMat, hollowDripMat, hollowFloorGrimeMat, handClawWeightScale: 2f));
+
+        // ---- F70: set pieces (plan section 3.4) ----
+
+        SetPiece BuildHollowCircle()
+        {
+            GameObject root = new GameObject("Hollow_Circle");
+            System.Random circleRng = new System.Random(314);
+            for (int cI = 0; cI < 8; cI++)
+            {
+                float angle = cI / 8f * Mathf.PI * 2f;
+                Vector3 pos = new Vector3(Mathf.Cos(angle) * 0.7f, 0f, 0.9f + Mathf.Sin(angle) * 0.7f);
+                float ch = 0.1f + (float)circleRng.NextDouble() * 0.1f;
+                CylinderRH(root.transform, $"Candle{cI}", pos + Vector3.up * ch * 0.5f, 0.02f, ch, woodMat, keepCollider: cI == 0);
+                Sphere(root.transform, $"Flame{cI}", pos + Vector3.up * (ch + 0.02f), Vector3.one * 0.025f, lanternMat);
+            }
+            GameObject doll = Sphere(root.transform, "DollHead", new Vector3(0f, 0.32f, 0.9f), Vector3.one * 0.1f, clothMat);
+            Capsule(root.transform, "DollBody", new Vector3(0f, 0.18f, 0.9f), new Vector3(0.15f, 0.14f, 0.15f), clothMat);
+            _ = doll;
+
+            for (int hI = 0; hI < 3; hI++)
+            {
+                float hx = -0.6f + hI * 0.6f;
+                CreateDecalQuad(root.transform, $"Handprint{hI}", hollowCommonDecals.Handprint, false, new Vector3(hx, 1.4f, 1.98f), Quaternion.Euler(0f, 0f, hI * 15f), 0.28f);
+            }
+
+            GameObject lightGo = new GameObject("Light");
+            lightGo.transform.SetParent(root.transform, false);
+            lightGo.transform.localPosition = new Vector3(0f, 0.5f, 0.9f);
+            Light circleLight = lightGo.AddComponent<Light>();
+            circleLight.type = LightType.Point;
+            circleLight.range = 3f;
+            circleLight.intensity = 0.6f;
+            circleLight.color = lanternGlow;
+            circleLight.shadows = LightShadows.None;
+            ConfigureFlicker(root, FlickerLight.FlickerMode.Candle, circleLight, null);
+
+            return FinishSetPiece(root, folder, width: 1.6f, depth: 1.7f, weight: 1f);
+        }
+
+        SetPiece BuildHollowNest()
+        {
+            GameObject root = new GameObject("Hollow_Nest");
+            System.Random hnRng = new System.Random(315);
+            for (int nI = 0; nI < 9; nI++)
+            {
+                float nx = (float)(hnRng.NextDouble() - 0.5) * 0.9f;
+                float nz = (float)hnRng.NextDouble() * 0.7f;
+                Sphere(root.transform, $"Wad{nI}", new Vector3(nx, 0.05f, nz), new Vector3(0.28f, 0.08f, 0.28f), clothMat, keepCollider: nI == 0);
+            }
+            for (int tI = 0; tI < 3; tI++)
+            {
+                float ty = 1.4f + tI * 0.3f;
+                CylinderBetween(root.transform, $"TotemStick{tI}", new Vector3(-0.2f, ty - 0.2f, 0.05f), new Vector3(0.2f, ty + 0.2f, 0.05f), 0.02f, woodMat);
+            }
+            for (int fI = 0; fI < 4; fI++)
+            {
+                float fx = -0.5f + fI * 0.35f;
+                Box(root.transform, $"FrameBorder{fI}", new Vector3(fx, 1.3f, 0.03f), new Vector3(0.18f, 0.22f, 0.02f), woodMat).transform.localRotation = Quaternion.Euler(0f, 0f, 25f);
+            }
+            CreateDecalQuad(root.transform, "ClawDecal", hollowCommonDecals.Claw, false, new Vector3(0f, 1.6f, 1.98f), Quaternion.identity, 0.85f);
+            return FinishSetPiece(root, folder, width: 1.8f, depth: 0.85f, weight: 1f);
+        }
+
+        List<SetPiece> setPieces = new List<SetPiece>
+        {
+            BuildHollowCircle(),
+            BuildHollowNest(),
+            BuildFallenRunnerSetPiece(hollowCommonDecals)
+        };
+
+        // Hollow dust is slower (ash) - lower startSpeed than the shared default.
+        DustMotes dust = BuildDustPrefab(folder, "Hollow_Dust", new Color(0.55f, 0.55f, 0.55f), 40f, 0.015f, 0.03f, speedMin: 0.01f, speedMax: 0.03f);
+
         return new ThemeAssets
         {
             DisplayName = "The Hollow",
@@ -1020,7 +1666,14 @@ public static class FloorThemeBuilder
             CeilingTile = ceilingTile,
             Lamp = lamp,
             Locker = locker,
-            Props = props.ToArray()
+            Props = props.ToArray(),
+            FloorPropChance = 0.35f,
+            WallDecalChance = 0.5f,
+            FloorDecalChance = 0.35f,
+            MaxDecalsPerCell = 2,
+            SetPieces = setPieces.ToArray(),
+            SetPieceCount = 3,
+            Dust = dust
         };
     }
 
@@ -1055,6 +1708,22 @@ public static class FloorThemeBuilder
             }
         }
 
+        // F70: set pieces need more room on their plinth than a single prop.
+        List<SetPiece> setPieceInstances = new List<SetPiece>();
+        if (assets.SetPieces != null)
+        {
+            foreach (SetPiece setPiecePrefab in assets.SetPieces)
+            {
+                // InstantiateShowcase already advances x by PieceSpacing; the extra half-step here
+                // brings a set piece's total advance to PieceSpacing * 1.5, since it needs more room
+                // than a single prop (plan section 3.5).
+                setPieceInstances.Add(InstantiateShowcase(rowGo.transform, setPiecePrefab, ref x));
+                x += PieceSpacing * 0.5f;
+            }
+        }
+
+        DustMotes dustInstance = InstantiateShowcase(rowGo.transform, assets.Dust, ref x);
+
         BuildSampleCell(rowGo.transform, assets);
 
         FloorTheme theme = rowGo.AddComponent<FloorTheme>();
@@ -1082,6 +1751,22 @@ public static class FloorThemeBuilder
         so.FindProperty("wallPropChance").floatValue = assets.WallPropChance;
         so.FindProperty("ceilingPropChance").floatValue = assets.CeilingPropChance;
         so.FindProperty("wallMaterial").objectReferenceValue = assets.WallMaterial;
+
+        // F70.
+        so.FindProperty("floorPropChance").floatValue = assets.FloorPropChance;
+        so.FindProperty("wallDecalChance").floatValue = assets.WallDecalChance;
+        so.FindProperty("floorDecalChance").floatValue = assets.FloorDecalChance;
+        so.FindProperty("maxDecalsPerCell").intValue = assets.MaxDecalsPerCell;
+
+        SerializedProperty setPiecesProp = so.FindProperty("setPieces");
+        setPiecesProp.arraySize = setPieceInstances.Count;
+        for (int i = 0; i < setPieceInstances.Count; i++)
+        {
+            setPiecesProp.GetArrayElementAtIndex(i).objectReferenceValue = setPieceInstances[i];
+        }
+        so.FindProperty("setPieceCount").intValue = assets.SetPieceCount;
+        so.FindProperty("dust").objectReferenceValue = dustInstance;
+
         so.ApplyModifiedPropertiesWithoutUndo();
 
         return theme;
@@ -1206,6 +1891,34 @@ public static class FloorThemeBuilder
                 propInstance.transform.localRotation = Quaternion.LookRotation(-dir);
                 propInstance.name = "Prop";
                 break; // one wall prop is enough for the mock-up
+            }
+
+            // F70: one floor prop (south wall) and one wall decal (west wall, above the wall prop) so the
+            // mock-up also shows the new mount kinds reading together in a corner.
+            foreach (PropPiece prop in assets.Props)
+            {
+                if (prop == null || prop.Mount != PropPiece.MountKind.Floor) continue;
+
+                GameObject floorPropInstance = (GameObject)PrefabUtility.InstantiatePrefab(prop.gameObject, cell);
+                Vector3 dir = Vector3.back; // south wall
+                floorPropInstance.transform.localPosition = dir * BackFaceDistance + Vector3.right * 1.0f;
+                floorPropInstance.transform.localRotation = Quaternion.LookRotation(-dir);
+                floorPropInstance.name = "FloorProp";
+                break;
+            }
+
+            foreach (PropPiece prop in assets.Props)
+            {
+                if (prop == null || prop.Mount != PropPiece.MountKind.WallDecal) continue;
+
+                GameObject decalInstance = (GameObject)PrefabUtility.InstantiatePrefab(prop.gameObject, cell);
+                Vector3 dir = Vector3.left; // west wall
+                float y = Mathf.Clamp(1.6f, prop.DecalSizeRange.y * 0.5f + 0.3f, 2.2f - prop.DecalSizeRange.y * 0.5f);
+                decalInstance.transform.localPosition = dir * (BackFaceDistance - 0.04f) + Vector3.forward * -1.0f + Vector3.up * y;
+                decalInstance.transform.localRotation = Quaternion.LookRotation(-dir);
+                decalInstance.transform.localScale = Vector3.one * prop.DecalSizeRange.y;
+                decalInstance.name = "WallDecal";
+                break;
             }
         }
     }
