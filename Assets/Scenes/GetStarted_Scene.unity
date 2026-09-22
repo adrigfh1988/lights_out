@@ -35477,7 +35477,7 @@ MonoBehaviour:
   aiFollower: {fileID: 461847994690786}
   disablePlayerJump: 1
   useFloorProfile: 1
-  debugFloor: 5
+  debugFloor: 1
   lockerCount: 10
   lockerWidth: 0.9
   lockerDepth: 0.6

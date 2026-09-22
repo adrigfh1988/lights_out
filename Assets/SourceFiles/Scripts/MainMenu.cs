@@ -150,6 +150,7 @@ public class MainMenu : MonoBehaviour
         Button exit = RuntimeUi.CreateButton(_titleScreen.transform, "EXIT",
             new Vector2(0f, 80f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
         exit.onClick.AddListener(GameFlow.Quit);
+        exit.gameObject.SetActive(GameFlow.CanQuit);
     }
 
     private void StartKitMaze()

@@ -24,6 +24,8 @@ public class PauseMenu : MonoBehaviour
     private GameObject _panel;
     private Button _restartButton;
     private bool _paused;
+    /// <summary>Last frame the cursor was locked and a pause was allowed. See the lock-loss check in Update.</summary>
+    private bool _wasLockedAndPausable;
 
     /// <summary>True while the pause panel is up.</summary>
     public bool IsPaused => _paused;
@@ -47,10 +49,25 @@ public class PauseMenu : MonoBehaviour
             PlayerLock.SetCursorFree(true);
         }
 
+        // In a browser, Esc belongs to the page: it releases the pointer lock and usually never reaches
+        // the game. So a lock lost while the game was pausable counts as a pause request. Only a
+        // Locked -> unlocked edge counts, and only if pausing was allowed on the frame before too, so a
+        // menu that frees the cursor itself (shop, endings) never trips it.
+        bool locked = Cursor.lockState == CursorLockMode.Locked;
+        bool canPause = !_paused && CanPause();
+        bool lockLost = _wasLockedAndPausable && !locked && canPause;
+        _wasLockedAndPausable = locked && canPause;
+        if (lockLost)
+        {
+            Pause();
+            return;
+        }
+
         bool pressed = false;
 #if ENABLE_INPUT_SYSTEM
-        // Read directly, like Flashlight: the Player action map has no Pause action
-        if (Keyboard.current != null && Keyboard.current.escapeKey.wasPressedThisFrame) pressed = true;
+        // Read directly, like Flashlight: the Player action map has no Pause action. P is the
+        // browser-safe key; Esc still works everywhere else.
+        if (Keyboard.current != null && (Keyboard.current.escapeKey.wasPressedThisFrame || Keyboard.current.pKey.wasPressedThisFrame)) pressed = true;
         if (Gamepad.current != null && Gamepad.current.startButton.wasPressedThisFrame) pressed = true;
 #endif
         if (!pressed) return;
@@ -142,5 +159,6 @@ public class PauseMenu : MonoBehaviour
         Button quit = RuntimeUi.CreateButton(_panel.transform, "QUIT",
             new Vector2(0f, 70f), size, 40f, ButtonIdle, ButtonHover, Color.white);
         quit.onClick.AddListener(GameFlow.Quit);
+        quit.gameObject.SetActive(GameFlow.CanQuit);
     }
 }

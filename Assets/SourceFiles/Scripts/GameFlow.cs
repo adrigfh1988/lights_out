@@ -69,6 +69,9 @@ public static class GameFlow
         Reload();
     }
 
+    /// <summary>False in a WebGL build: Application.Quit does nothing in a browser tab, so menus hide their Quit/Exit buttons.</summary>
+    public static bool CanQuit => Application.platform != RuntimePlatform.WebGLPlayer;
+
     public static void Quit()
     {
 #if UNITY_EDITOR
