@@ -37,7 +37,10 @@ public static class PlayerLock
     /// </summary>
     public static void SetCursorFree(bool free)
     {
-        Cursor.lockState = free ? CursorLockMode.None : CursorLockMode.Locked;
-        Cursor.visible = free;
+        // F76 T5: same rule as StarterAssetsInputs.SetCursorState - "locked" means "unlocked" while
+        // touch drives the game, so a menu closing never re-engages a pointer lock that just eats taps.
+        bool locked = !free && !TouchInput.Active;
+        Cursor.lockState = locked ? CursorLockMode.Locked : CursorLockMode.None;
+        Cursor.visible = !locked;
     }
 }

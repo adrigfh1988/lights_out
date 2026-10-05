@@ -9,10 +9,13 @@ using UnityEngine.SceneManagement;
 /// it can be inspected and edited in Unity like anything else. Nothing here runs in a build; at Play
 /// time the ShopRoom component just drives what this made.
 ///
-/// Rebuilding replaces the existing room (after asking). Materials live in
-/// Assets/SourceFiles/Materials/Shop and are reused, not overwritten, so tweaks to them survive.
+/// The room is an alchemist's shop dressed from the Assets/BK_AlchemistHouse pack (its materials are
+/// converted to URP by AlchemistMaterialUpgrade). The shell, lights, door, counter and salesman live in
+/// this file; the placement helpers and the furniture passes are in ShopRoomBuilder.Dressing.cs.
+///
+/// Rebuilding replaces the existing room (after asking). Spec: plannings/shop-room-alchemist-plan.md.
 /// </summary>
-public static class ShopRoomBuilder
+public static partial class ShopRoomBuilder
 {
     private const string RoomName = "ShopRoom";
     private const string MaterialFolder = "Assets/SourceFiles/Materials/Shop";
@@ -20,10 +23,13 @@ public static class ShopRoomBuilder
     // Where the room sits, west of the 11x11 maze (which spans x -70..-20 and z -70..-20). Floor top of
     // the maze is y = 5.0. It must stay above y = -5 or RespawnPlayer bounces the player out of it.
     private static readonly Vector3 RoomPosition = new Vector3(-92f, 5f, -45f);
+    private const string GuardFolder = "Assets/UnityTechnologies/Adam Character Pack/Guard";
 
-    private const float Inner = 12f;      // floor size inside the walls
-    private const float WallHeight = 4f;
-    private const float WallThickness = 0.5f;
+    private const float HalfX = 4.5f;        // inner half-width  (3 modules x 3 m)
+    private const float HalfZ = 6f;          // inner half-depth  (4 modules x 3 m)
+    private const float RoomHeight = 3f;
+    private const float Module = 3f;         // 2.5 m pack module x ArchScale
+    private const float ArchScale = 1.2f;
 
     private static readonly Color HatchGreen = new Color(0.25f, 1f, 0.7f);
     private static readonly Color Amber = new Color(1f, 0.72f, 0.42f);
@@ -47,23 +53,72 @@ public static class ShopRoomBuilder
             {
                 return;
             }
-            Undo.DestroyObjectImmediate(existing.gameObject);
         }
 
+        if (AlchemistMaterialUpgrade.NeedsConversion())
+        {
+            if (!EditorUtility.DisplayDialog("Build Shop Room",
+                    "The Alchemist House materials are still on Built-in shaders and would render magenta. Convert them to URP now? " +
+                    "This edits the materials under Assets/BK_AlchemistHouse in place.",
+                    "Convert", "Cancel"))
+            {
+                return;
+            }
+        }
+
+        BuildSilently();
+    }
+
+    /// <summary>No dialogs: replaces any existing room and converts the pack materials if needed. Used for scripted rebuilds.</summary>
+    public static void BuildSilently()
+    {
+        Scene scene = SceneManager.GetActiveScene();
+        if (!scene.IsValid() || !scene.isLoaded)
+        {
+            Debug.LogError("Build Shop Room: open the game scene first.");
+            return;
+        }
+
+        ShopRoom existing = Object.FindAnyObjectByType<ShopRoom>(FindObjectsInactive.Include);
+        if (existing != null) Undo.DestroyObjectImmediate(existing.gameObject);
+
+        // A previous build that died half-way leaves the root behind without its component.
+        GameObject stale;
+        while ((stale = GameObject.Find(RoomName)) != null) Undo.DestroyObjectImmediate(stale);
+
+        if (AlchemistMaterialUpgrade.NeedsConversion()) AlchemistMaterialUpgrade.Convert();
+
+        BuildCore(scene);
+    }
+
+    private static void BuildCore(Scene scene)
+    {
         EnsureFolder();
         Materials mats = LoadMaterials();
+        UsedPrefabs.Clear();
+        KeptLights.Clear();
 
         GameObject root = new GameObject(RoomName);
         Undo.RegisterCreatedObjectUndo(root, "Build Shop Room");
         root.transform.position = RoomPosition;
+        _room = root.transform;
 
-        BuildShell(root.transform, mats);
-        BuildLights(root.transform);
-        BuildCounter(root.transform, mats);
+        BuildShell(root.transform);
+        BuildBackdrop(root.transform, mats.Wall);
+        BuildColliders(root.transform);
+        BuildDoor(root.transform);
+        GameObject[] counterTables = BuildCounter(root.transform);
         Transform head = BuildSalesman(root.transform, mats);
-        TextMeshPro counterSign = BuildSign(root.transform, "ShopSign", new Vector3(0f, 3.2f, 5.6f), Quaternion.identity, "SHARDS ACCEPTED", Amber, 8f);
-        TextMeshPro doorSign = BuildSign(root.transform, "DoorSign", new Vector3(0f, 3.3f, -5.7f), Quaternion.Euler(0f, 180f, 0f), "FLOOR 2", HatchGreen, 6f);
-        BuildDoor(root.transform, mats);
+        DressCounter(Group(root.transform, "CounterTop"), counterTables);
+        BuildBackWall(root.transform);
+        BuildLabSide(root.transform);
+        BuildLibrarySide(root.transform);
+        BuildCorners(root.transform);
+        BuildCarpets(root.transform);
+        BuildLights(root.transform);
+
+        TextMeshPro counterSign = BuildSign(root.transform, "ShopSign", new Vector3(0f, 2.45f, 3.6f), Quaternion.identity, "SHARDS ACCEPTED", Amber, 8f, 3.5f);
+        TextMeshPro doorSign = BuildSign(root.transform, "DoorSign", new Vector3(0f, 2.68f, -5.92f), Quaternion.Euler(0f, 180f, 0f), "FLOOR 2", HatchGreen, 6f, 3f);
 
         Transform points = new GameObject("Points").transform;
         points.SetParent(root.transform, false);
@@ -87,76 +142,109 @@ public static class ShopRoomBuilder
         so.ApplyModifiedPropertiesWithoutUndo();
 
         Selection.activeGameObject = root;
-        SceneView.lastActiveSceneView?.FrameSelected();
         EditorSceneManager.MarkSceneDirty(scene);
 
-        Debug.Log("Shop room built. Save the scene (Ctrl+S) to keep it.", root);
+        Debug.Log($"Shop room built ({UsedPrefabs.Count} pack prefabs). Save the scene (Ctrl+S) to keep it.\n{Audit(root.transform)}", root);
     }
 
     // ---------------------------------------------------------------- pieces
 
-    private static void BuildShell(Transform root, Materials m)
-    {
-        Transform shell = Group(root, "Shell");
-        float outer = Inner + 2f * WallThickness;
-        float half = Inner * 0.5f;
-        float offset = half + WallThickness * 0.5f;
-        float wallY = WallHeight * 0.5f;
-
-        Box(shell, "Floor", new Vector3(0f, -0.1f, 0f), new Vector3(outer, 0.2f, outer), m.Floor);
-        Box(shell, "Ceiling", new Vector3(0f, WallHeight + 0.1f, 0f), new Vector3(outer, 0.2f, outer), m.Ceiling);
-        Box(shell, "Wall_N", new Vector3(0f, wallY, offset), new Vector3(outer, WallHeight, WallThickness), m.Wall);
-        Box(shell, "Wall_S", new Vector3(0f, wallY, -offset), new Vector3(outer, WallHeight, WallThickness), m.Wall);
-        Box(shell, "Wall_E", new Vector3(offset, wallY, 0f), new Vector3(WallThickness, WallHeight, outer), m.Wall);
-        Box(shell, "Wall_W", new Vector3(-offset, wallY, 0f), new Vector3(WallThickness, WallHeight, outer), m.Wall);
-    }
-
-    private static void BuildLights(Transform root)
-    {
-        Transform lights = Group(root, "Lights");
-        Color warm = new Color(1f, 0.82f, 0.62f);
-        const float q = 3.5f;
-
-        PointLight(lights, "Light_NE", new Vector3(q, 3.6f, q), warm, 9f, 1.6f);
-        PointLight(lights, "Light_NW", new Vector3(-q, 3.6f, q), warm, 9f, 1.6f);
-        PointLight(lights, "Light_SE", new Vector3(q, 3.6f, -q), warm, 9f, 1.6f);
-        PointLight(lights, "Light_SW", new Vector3(-q, 3.6f, -q), warm, 9f, 1.6f);
-        PointLight(lights, "CounterLight", new Vector3(0f, 3.2f, 4f), Amber, 6f, 2.2f);
-        PointLight(lights, "DoorLight", new Vector3(0f, 1.5f, -5.5f), HatchGreen, 5f, 1.2f);
-    }
-
-    private static void BuildCounter(Transform root, Materials m)
-    {
-        Transform counter = Group(root, "Counter");
-        Box(counter, "CounterTop", new Vector3(0f, 0.525f, 4f), new Vector3(3.2f, 1.05f, 0.9f), m.Counter);
-        GameObject strip = Box(counter, "CounterStrip", new Vector3(0f, 1.05f, 3.55f), new Vector3(3.2f, 0.04f, 0.04f), m.CounterStrip);
-        Object.DestroyImmediate(strip.GetComponent<Collider>());
-    }
-
     /// <summary>The salesman stands behind the counter facing -Z (the room). Returns the head pivot the component turns.</summary>
+    /// <remarks>
+    /// The body is the Guard from the Adam Character Pack (the hunter is Adam, so the two never read as the
+    /// same thing), idling on the pack's own controller. The head pivot is its Humanoid Head bone: ShopRoom
+    /// turns it in LateUpdate, on top of whatever the idle clip did that frame.
+    /// </remarks>
     private static Transform BuildSalesman(Transform root, Materials m)
     {
         Transform salesman = Group(root, "Salesman");
         salesman.localPosition = new Vector3(0f, 0f, 5.1f);
+        salesman.localRotation = Quaternion.Euler(0f, 180f, 0f);
 
-        // The body keeps its collider: it is what stops the player walking through the salesman.
-        Primitive(salesman, PrimitiveType.Capsule, "Body", new Vector3(0f, 0.95f, 0f), new Vector3(0.55f, 0.95f, 0.55f), m.Coat, keepCollider: true);
+        // This collider is what stops the player walking through the salesman; the Guard itself has none.
+        CapsuleCollider blocker = salesman.gameObject.AddComponent<CapsuleCollider>();
+        blocker.center = new Vector3(0f, 0.9f, 0f);
+        blocker.radius = 0.3f;
+        blocker.height = 1.8f;
 
-        // Pivot faces -Z (yaw 180), so "in front of the head" is local +Z for everything parented to it.
-        Transform head = new GameObject("Head").transform;
-        head.SetParent(salesman, false);
-        head.localPosition = Vector3.zero;
-        head.localRotation = Quaternion.Euler(0f, 180f, 0f);
+        GameObject model = AssetDatabase.LoadAssetAtPath<GameObject>(GuardFolder + "/Guard.FBX");
+        if (model == null)
+        {
+            Debug.LogError($"ShopRoomBuilder: {GuardFolder}/Guard.FBX is missing, so the shop has no salesman body.");
+            return null;
+        }
 
-        Primitive(head, PrimitiveType.Sphere, "HeadMesh", new Vector3(0f, 2.05f, 0f), Vector3.one * 0.42f, m.Coat);
-        Primitive(head, PrimitiveType.Cylinder, "HatBrim", new Vector3(0f, 2.28f, 0f), new Vector3(0.8f, 0.03f, 0.8f), m.Coat);
-        Primitive(head, PrimitiveType.Cylinder, "HatCrown", new Vector3(0f, 2.42f, 0f), new Vector3(0.42f, 0.14f, 0.42f), m.Coat);
-        Primitive(head, PrimitiveType.Sphere, "EyeL", new Vector3(-0.09f, 2.08f, 0.19f), Vector3.one * 0.06f, m.Eyes);
-        Primitive(head, PrimitiveType.Sphere, "EyeR", new Vector3(0.09f, 2.08f, 0.19f), Vector3.one * 0.06f, m.Eyes);
+        GameObject guard = (GameObject)PrefabUtility.InstantiatePrefab(model);
+        guard.name = "Guard";
+        guard.transform.SetParent(salesman, false);
+
+        Animator animator = guard.GetComponent<Animator>();
+        if (animator == null) animator = guard.AddComponent<Animator>();
+        animator.runtimeAnimatorController = AssetDatabase.LoadAssetAtPath<RuntimeAnimatorController>(GuardFolder + "/Guard_AnimationController.controller");
+        animator.applyRootMotion = false;
+        animator.cullingMode = AnimatorCullingMode.AlwaysAnimate;
+
+        // Pose it now, so the room shows him idling in the Editor too instead of standing in his bind pose.
+        AnimationClip idle = LoadGuardIdle();
+        if (idle != null)
+        {
+            idle.SampleAnimation(guard, 0f);
+            guard.transform.localPosition = Vector3.zero;
+            guard.transform.localRotation = Quaternion.identity;
+        }
+
+        Transform head = animator.isHuman ? animator.GetBoneTransform(HumanBodyBones.Head) : null;
+        if (head == null)
+        {
+            Debug.LogWarning("ShopRoomBuilder: the Guard has no Humanoid Head bone, so the salesman's head will not follow the player.", guard);
+            return null;
+        }
+
+        BuildSalesmanEyes(guard, head, salesman, m);
         return head;
     }
 
-    private static TextMeshPro BuildSign(Transform root, string name, Vector3 localPosition, Quaternion localRotation, string text, Color color, float spacing)
+    /// <summary>Two small emissive beads over the Guard's own eyes, riding the head bone, so he keeps the amber stare.</summary>
+    private static void BuildSalesmanEyes(GameObject guard, Transform head, Transform salesman, Materials m)
+    {
+        Renderer eyes = null;
+        foreach (Renderer r in guard.GetComponentsInChildren<Renderer>(true))
+        {
+            if (r.name.Contains("reflection_eyes")) eyes = r;
+        }
+        if (eyes == null) return;
+
+        Bounds b = eyes.bounds;
+        Vector3 centre = b.center + salesman.forward * (Vector3.Scale(b.extents, Abs(salesman.forward)).magnitude + 0.004f);
+        float half = Vector3.Scale(b.extents, Abs(salesman.right)).magnitude * 0.55f;
+
+        foreach (float side in new[] { -1f, 1f })
+        {
+            GameObject eye = Primitive(head, PrimitiveType.Sphere, side < 0f ? "EyeL" : "EyeR", Vector3.zero, Vector3.one, m.Eyes);
+            eye.transform.position = centre + salesman.right * (half * side);
+            eye.transform.rotation = Quaternion.identity;
+            SetWorldScale(eye.transform, 0.02f);
+        }
+    }
+
+    private static Vector3 Abs(Vector3 v) => new Vector3(Mathf.Abs(v.x), Mathf.Abs(v.y), Mathf.Abs(v.z));
+
+    private static void SetWorldScale(Transform t, float size)
+    {
+        Vector3 parent = t.parent != null ? t.parent.lossyScale : Vector3.one;
+        t.localScale = new Vector3(size / parent.x, size / parent.y, size / parent.z);
+    }
+
+    private static AnimationClip LoadGuardIdle()
+    {
+        foreach (Object asset in AssetDatabase.LoadAllAssetsAtPath(GuardFolder + "/Guard_Idle.FBX"))
+        {
+            if (asset is AnimationClip clip && !clip.name.StartsWith("__")) return clip;
+        }
+        return null;
+    }
+
+    private static TextMeshPro BuildSign(Transform root, string name, Vector3 localPosition, Quaternion localRotation, string text, Color color, float spacing, float fontSize)
     {
         GameObject go = new GameObject(name);
         go.transform.SetParent(root, false);
@@ -166,26 +254,12 @@ public static class ShopRoomBuilder
         TextMeshPro tmp = go.AddComponent<TextMeshPro>();
         if (TMP_Settings.defaultFontAsset != null) tmp.font = TMP_Settings.defaultFontAsset;
         tmp.text = text;
-        tmp.fontSize = 6f;
+        tmp.fontSize = fontSize;
         tmp.color = color;
         tmp.characterSpacing = spacing;
         tmp.alignment = TextAlignmentOptions.Center;
         tmp.rectTransform.sizeDelta = new Vector2(10f, 2f);
         return tmp;
-    }
-
-    private static void BuildDoor(Transform root, Materials m)
-    {
-        Transform door = Group(root, "Door");
-        const float z = -6f; // the inner face of the south wall
-
-        GameObject postL = Box(door, "PostL", new Vector3(-0.9f, 1.5f, z), new Vector3(0.2f, 3f, 0.2f), m.DoorFrame);
-        GameObject postR = Box(door, "PostR", new Vector3(0.9f, 1.5f, z), new Vector3(0.2f, 3f, 0.2f), m.DoorFrame);
-        GameObject lintel = Box(door, "Lintel", new Vector3(0f, 3.1f, z), new Vector3(2f, 0.2f, 0.2f), m.DoorFrame);
-        GameObject panel = Box(door, "Panel", new Vector3(0f, 1.5f, z + 0.02f), new Vector3(1.6f, 2.8f, 0.1f), m.DoorPanel);
-
-        // Set dressing against a wall: nothing should collide with it.
-        foreach (GameObject part in new[] { postL, postR, lintel, panel }) Object.DestroyImmediate(part.GetComponent<Collider>());
     }
 
     private static Collider BuildZone(Transform parent, string name, Vector3 localCenter, Vector3 size)
@@ -207,11 +281,6 @@ public static class ShopRoomBuilder
         Transform t = new GameObject(name).transform;
         t.SetParent(parent, false);
         return t;
-    }
-
-    private static GameObject Box(Transform parent, string name, Vector3 localPosition, Vector3 size, Material material)
-    {
-        return Primitive(parent, PrimitiveType.Cube, name, localPosition, size, material, keepCollider: true);
     }
 
     private static GameObject Primitive(Transform parent, PrimitiveType type, string name, Vector3 localPosition, Vector3 scale, Material material, bool keepCollider = false)
@@ -248,9 +317,10 @@ public static class ShopRoomBuilder
 
     // ---------------------------------------------------------------- materials
 
+    // The salesman's eyes and the wall backdrop are the only primitives left. The old Shop_Floor/Ceiling/Counter/Door materials stay on disk, unused.
     private struct Materials
     {
-        public Material Floor, Ceiling, Wall, Counter, CounterStrip, Coat, Eyes, DoorFrame, DoorPanel;
+        public Material Eyes, Wall;
     }
 
     private static void EnsureFolder()
@@ -263,15 +333,8 @@ public static class ShopRoomBuilder
     {
         Materials m = new Materials
         {
-            Floor = LoadOrCreate("Shop_Floor", new Color(0.10f, 0.10f, 0.12f), null),
-            Ceiling = LoadOrCreate("Shop_Ceiling", new Color(0.06f, 0.06f, 0.07f), null),
             Wall = LoadOrCreate("Shop_Wall", new Color(0.22f, 0.22f, 0.25f), null),
-            Counter = LoadOrCreate("Shop_Counter", new Color(0.12f, 0.10f, 0.09f), null),
-            Coat = LoadOrCreate("Shop_Coat", new Color(0.04f, 0.04f, 0.05f), null),
-            DoorPanel = LoadOrCreate("Shop_DoorPanel", new Color(0.03f, 0.03f, 0.03f), null),
-            CounterStrip = LoadOrCreate("Shop_CounterStrip", Amber, Amber * 2f),
             Eyes = LoadOrCreate("Shop_Eyes", new Color(1f, 0.7f, 0.3f), new Color(1f, 0.7f, 0.3f) * 4f),
-            DoorFrame = LoadOrCreate("Shop_DoorFrame", HatchGreen, HatchGreen * 2f),
         };
         AssetDatabase.SaveAssets();
         return m;

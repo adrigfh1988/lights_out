@@ -86,8 +86,10 @@ public class DreadDirector : MonoBehaviour
     [SerializeField] private float flickerDuration = 0.25f;
     [SerializeField] private float firstDeathProgress = 0.5f;
     [SerializeField] private float secondDeathProgress = 0.75f;
+    // F71: halved from 0.2 - the new density (FloorProfile.CellsPerLamp 5..8, was 2..3) means far fewer
+    // lamps exist to begin with, so the old fraction emptied a floor almost completely by wave 2.
     [Tooltip("Fraction of the ORIGINAL live, non-locker lamp count killed at each death wave")]
-    [SerializeField] private float deathWaveFraction = 0.2f;
+    [SerializeField] private float deathWaveFraction = 0.1f;
     [SerializeField] private float deathFadeSeconds = 1.5f;
     [SerializeField] private float firstDarkenFraction = 0.35f;
     [SerializeField] private float secondDarkenFraction = 0.6f;
@@ -185,6 +187,12 @@ public class DreadDirector : MonoBehaviour
         {
             nearDistance = profile.RelocateNearDistance;
         }
+    }
+
+    /// <summary>F74 Restless run rule: scales hardMinimumCooldown so relocations can chain tighter. Called at most once per floor (MazeGenerator.SetUpAtmosphere), so multiplying in place is safe.</summary>
+    public void SetHardMinimumCooldownMultiplier(float multiplier)
+    {
+        hardMinimumCooldown *= Mathf.Max(0.01f, multiplier);
     }
 
     private void OnEnable()
@@ -562,7 +570,9 @@ public class DreadDirector : MonoBehaviour
             for (int i = 0; i < lamps.Count; i++)
             {
                 WallLamp lamp = lamps[i];
-                if (lamp == null || lamp.IsDead) continue;
+                // F73: an unpowered lamp (Blackout floor, before its fuse) is already dark - a blink
+                // would be invisible, and Update skips its own flicker tick while unpowered anyway.
+                if (lamp == null || lamp.IsDead || !lamp.IsPowered) continue;
 
                 float delay = Vector3.Distance(lamp.transform.position, at) / flickerWaveSpeed;
                 lamp.Blink(flickerDuration, delay);
@@ -590,7 +600,7 @@ public class DreadDirector : MonoBehaviour
             for (int i = 0; i < lamps.Count; i++)
             {
                 WallLamp lamp = lamps[i];
-                if (lamp != null && !lamp.IsDead) lamp.Blink(breathSeconds);
+                if (lamp != null && !lamp.IsDead && lamp.IsPowered) lamp.Blink(breathSeconds);
             }
         }
 
@@ -625,7 +635,10 @@ public class DreadDirector : MonoBehaviour
         for (int i = 0; i < lamps.Count; i++)
         {
             WallLamp lamp = lamps[i];
-            if (lamp != null && !lamp.IsLockerLamp && !lamp.IsDead) candidates.Add(lamp);
+            // F71: a lamp within 1 cell of a live star is exempt, same reasoning as the locker-lamp
+            // exemption above it - a star you cannot find is not a reward, it is a bug.
+            // F73: an unpowered lamp (Blackout floor, before its fuse) has nothing to kill.
+            if (lamp != null && !lamp.IsLockerLamp && !lamp.IsDead && lamp.IsPowered && !IsNearLiveStar(lamp)) candidates.Add(lamp);
         }
 
         for (int i = candidates.Count - 1; i > 0; i--)
@@ -634,10 +647,27 @@ public class DreadDirector : MonoBehaviour
             (candidates[i], candidates[j]) = (candidates[j], candidates[i]);
         }
 
-        int killCount = Mathf.CeilToInt(_originalLiveLampCount * deathWaveFraction);
+        int killCount = Mathf.Max(1, Mathf.CeilToInt(_originalLiveLampCount * deathWaveFraction));
         for (int i = 0; i < killCount && i < candidates.Count; i++)
         {
             candidates[i].Kill(deathFadeSeconds);
         }
+    }
+
+    /// <summary>F71: true if an uncollected star sits within one cell of this lamp. Collected stars are
+    /// destroyed (MazeGenerator.Stars entries go null), so they stop counting on their own.</summary>
+    private bool IsNearLiveStar(WallLamp lamp)
+    {
+        if (_maze == null) return false;
+
+        IReadOnlyList<Transform> stars = _maze.Stars;
+        float threshold = _maze.CellSize * 1.5f; // adjacent cell centres are one cellSize apart
+        for (int i = 0; i < stars.Count; i++)
+        {
+            Transform star = stars[i];
+            if (star != null && Vector3.Distance(lamp.transform.position, star.position) <= threshold) return true;
+        }
+
+        return false;
     }
 }

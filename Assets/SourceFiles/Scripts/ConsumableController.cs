@@ -83,6 +83,9 @@ public class ConsumableController : MonoBehaviour
             if (Gamepad.current.dpad.right.wasPressedThisFrame) slot2 = true;
         }
 #endif
+        if (TouchInput.Pressed(TouchInput.TouchAction.Item1)) slot1 = true;
+        if (TouchInput.Pressed(TouchInput.TouchAction.Item2)) slot2 = true;
+
         if (slot1) UseBattery();
         if (slot2) UseCompass();
     }
@@ -145,9 +148,9 @@ public class ConsumableController : MonoBehaviour
         {
             if (!GameFlow.IsRunActive || GameOutcome.IsOver) break;
 
-            Transform nearest = NearestStar();
+            Transform nearest = NearestCompassTarget();
             Camera cam = Camera.main;
-            if (nearest == null) break; // no stars left
+            if (nearest == null) break; // nothing left to point at
 
             if (cam != null && _player != null)
             {
@@ -179,26 +182,52 @@ public class ConsumableController : MonoBehaviour
         _compassRoutine = null;
     }
 
-    private Transform NearestStar()
+    /// <summary>The nearest live star, or - F75 Fuse Map shop item - the nearest still-outstanding fuse
+    /// box, button or (F77) key too, whichever is closer.</summary>
+    private Transform NearestCompassTarget()
     {
         if (_maze == null || _player == null) return null;
 
         Transform best = null;
         float bestDistance = float.MaxValue;
+
         foreach (Transform star in _maze.Stars)
         {
             if (star == null) continue;
+            float distance = FlatSqrDistance(star.position);
+            if (distance < bestDistance) { bestDistance = distance; best = star; }
+        }
 
-            Vector3 flat = star.position - _player.position;
-            flat.y = 0f;
-            float distance = flat.sqrMagnitude;
-            if (distance < bestDistance)
+        if (PlayerInventory.HasActive(ShopItem.FuseMap))
+        {
+            foreach (FuseBox box in _maze.FuseBoxes)
             {
-                bestDistance = distance;
-                best = star;
+                if (box == null || box.IsDone) continue;
+                float distance = FlatSqrDistance(box.transform.position);
+                if (distance < bestDistance) { bestDistance = distance; best = box.transform; }
+            }
+            foreach (WallButton button in _maze.Buttons)
+            {
+                if (button == null || !button.NeedsAttention) continue;
+                float distance = FlatSqrDistance(button.transform.position);
+                if (distance < bestDistance) { bestDistance = distance; best = button.transform; }
+            }
+            foreach (KeyPickup key in _maze.Keys)
+            {
+                if (key == null || key.IsTaken) continue;
+                float distance = FlatSqrDistance(key.transform.position);
+                if (distance < bestDistance) { bestDistance = distance; best = key.transform; }
             }
         }
+
         return best;
+    }
+
+    private float FlatSqrDistance(Vector3 worldPosition)
+    {
+        Vector3 flat = worldPosition - _player.position;
+        flat.y = 0f;
+        return flat.sqrMagnitude;
     }
 
     private void EnsureChevron()

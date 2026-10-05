@@ -34,6 +34,9 @@ public class PlayerStamina : MonoBehaviour
     /// <summary>True while the controller is actually sprinting this frame.</summary>
     public bool IsSprinting => _controller != null && _controller.IsSprinting;
 
+    /// <summary>External lock, e.g. F74's carried lantern. ORed with Exhausted below - set once on pickup/put-down, not fought over every frame.</summary>
+    public bool SprintBlocked { get; set; }
+
     private void Awake()
     {
         _controller = GetComponent<ThirdPersonController>();
@@ -70,6 +73,6 @@ public class PlayerStamina : MonoBehaviour
             Exhausted = false;
         }
 
-        _controller.SprintLocked = Exhausted;
+        _controller.SprintLocked = Exhausted || SprintBlocked;
     }
 }

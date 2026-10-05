@@ -30,7 +30,6 @@ public class PlayerStealthState : MonoBehaviour
     [SerializeField] private float lampVisibilityBonus = 0.45f;
 
     private CharacterController _controller;
-    private IReadOnlyList<WallLamp> _lamps = System.Array.Empty<WallLamp>();
 
     /// <summary>How far away the player can currently be heard, in metres. 0 when standing still.</summary>
     public float NoiseRadius { get; private set; }
@@ -40,6 +39,21 @@ public class PlayerStealthState : MonoBehaviour
 
     /// <summary>Set by the flashlight so the audio director can react without knowing about it.</summary>
     public bool FlashlightOn { get; set; } = true;
+
+    /// <summary>
+    /// How visible the torch itself makes the player, written every frame by Flashlight from its
+    /// wide/focused blend (F71): a wide flood is a little less telling than the old flat 1, a focused
+    /// beam considerably more, since it is a bright, narrow, unmistakable shaft. Only read while
+    /// FlashlightOn is true - see VisibilityMultiplier below.
+    /// </summary>
+    public float TorchVisibility { get; set; } = 1f;
+
+    /// <summary>
+    /// F74: a floor set on the player from outside (currently only Lantern, while carried - 0.8, per
+    /// the slice spec) rather than computed here. Folded into VisibilityMultiplier as a lower bound so
+    /// it can only make the player more visible, never override Hidden.
+    /// </summary>
+    public float MinVisibility { get; set; }
 
     /// <summary>True while hidden inside a locker.</summary>
     public bool Hidden { get; private set; }
@@ -58,22 +72,41 @@ public class PlayerStealthState : MonoBehaviour
 
     /// <summary>Scales how far the AI can see the player. 1 = fully lit, lower = harder to spot.</summary>
     public float VisibilityMultiplier =>
-        Hidden ? 0f : FlashlightOn ? 1f : Mathf.Min(1f, darkVisibility + lampVisibilityBonus * LampExposure);
+        Hidden ? 0f : Mathf.Max(MinVisibility, FlashlightOn ? TorchVisibility : Mathf.Min(1f, darkVisibility + lampVisibilityBonus * LampExposure));
 
     /// <summary>0 when standing still, 1 when sprinting. Drives footstep volume.</summary>
     public float NoiseFraction => sprintNoiseRadius > 0f ? Mathf.Clamp01(NoiseRadius / sprintNoiseRadius) : 0f;
+
+    // F74: every NoisySurface (glass/puddle) the player currently overlaps, ref-counted so two
+    // overlapping patches never stack multiplicatively - the loudest active one simply wins. Walk and
+    // sprint multipliers are tracked separately since glass/puddle scale them by different amounts.
+    private readonly List<(float walk, float sprint)> _activeSurfaces = new List<(float, float)>();
+
+    /// <summary>The multiplier actually in effect for the player's current motion state (walk or sprint), recomputed every Update. 1 while off any noisy surface.</summary>
+    public float SurfaceNoiseMultiplier { get; private set; } = 1f;
+
+    /// <summary>Called by NoisySurface.OnTriggerEnter.</summary>
+    public void EnterSurface(float walkMultiplier, float sprintMultiplier)
+    {
+        _activeSurfaces.Add((walkMultiplier, sprintMultiplier));
+    }
+
+    /// <summary>Called by NoisySurface.OnTriggerExit/OnDestroy. A no-op if the pair was never entered (defensive).</summary>
+    public void ExitSurface(float walkMultiplier, float sprintMultiplier)
+    {
+        for (int i = 0; i < _activeSurfaces.Count; i++)
+        {
+            if (!Mathf.Approximately(_activeSurfaces[i].walk, walkMultiplier) || !Mathf.Approximately(_activeSurfaces[i].sprint, sprintMultiplier)) continue;
+            _activeSurfaces.RemoveAt(i);
+            break;
+        }
+    }
 
     /// <summary>Called by Locker on Enter/Leave. spot == null clears the hidden state.</summary>
     public void SetHidden(IHidingSpot spot)
     {
         Hidden = spot != null;
         CurrentHidingSpot = spot;
-    }
-
-    /// <summary>Handed by MazeGenerator once every lamp exists. May be empty.</summary>
-    public void SetLamps(IReadOnlyList<WallLamp> lamps)
-    {
-        _lamps = lamps ?? System.Array.Empty<WallLamp>();
     }
 
     private void Awake()
@@ -89,14 +122,23 @@ public class PlayerStealthState : MonoBehaviour
         velocity.y = 0f;
         float speed = velocity.magnitude;
 
+        float walkSurface = 1f, sprintSurface = 1f;
+        for (int i = 0; i < _activeSurfaces.Count; i++)
+        {
+            walkSurface = Mathf.Max(walkSurface, _activeSurfaces[i].walk);
+            sprintSurface = Mathf.Max(sprintSurface, _activeSurfaces[i].sprint);
+        }
+
         float target;
-        if (speed > sprintSpeedThreshold) target = sprintNoiseRadius;
-        else if (speed > walkSpeedThreshold) target = walkNoiseRadius;
-        else target = 0f;
+        if (speed > sprintSpeedThreshold) { target = sprintNoiseRadius * sprintSurface; SurfaceNoiseMultiplier = sprintSurface; }
+        else if (speed > walkSpeedThreshold) { target = walkNoiseRadius * walkSurface; SurfaceNoiseMultiplier = walkSurface; }
+        else { target = 0f; SurfaceNoiseMultiplier = 1f; }
         target *= NoiseScale;
 
         NoiseRadius = Mathf.MoveTowards(NoiseRadius, target, sprintNoiseRadius * noiseSmoothing * Time.deltaTime);
 
-        LampExposure = WallLamp.ExposureAt(_lamps, transform.position + Vector3.up);
+        // F73: LightPool covers every wall lamp (and, from F74, candles/lanterns) without MazeGenerator
+        // handing this component its lamp list directly.
+        LampExposure = LightPool.ExposureAt(transform.position + Vector3.up);
     }
 }

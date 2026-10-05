@@ -65,8 +65,17 @@ public static class PlayerWallet
     {
         ShardsFoundThisAttempt++;
         int floor = Mathf.Clamp(GameFlow.CurrentFloor, 1, FloorProfile.FinalFloor);
+        // The anti-farm counter (and the cap it feeds, MazeShardsAlreadyTakenOnFloor) always tracks the
+        // flat ShardValue - only the actual payout below is scaled by F74's KeenEars run rule, or the
+        // cap would silently shrink whenever a floor happens to roll it.
         MazeShardsEarnedOnFloor[floor] += ShardValue;
-        Add(ShardValue);
+        Add(Mathf.RoundToInt(ShardValue * RunRules.ShardPayoutMultiplier));
+    }
+
+    /// <summary>F74: a one-off reward not tied to a maze shard or a floor clear - currently only a lore note's first read this campaign.</summary>
+    public static void AwardBonus(int amount)
+    {
+        if (amount != 0) Add(amount);
     }
 
     public static Payout ComputeFloorClear(int floor, int stars, float secondsLeft)
@@ -94,6 +103,9 @@ public static class PlayerWallet
     {
         int f = Mathf.Clamp(floor, 1, FloorProfile.FinalFloor);
         int raw = Mathf.RoundToInt(stars * StarValue * ConsolationFraction);
+        // F77 decision 3: the seedless FloorProfile.For(f) is the base star count, no rolled mechanics -
+        // Blackout/KeyHunt trim stars on the real (seeded) profile, so this cap is deliberately on the
+        // untrimmed count (slightly generous on a trimmed floor; harmless).
         int cap = FloorProfile.For(f).StarCount * StarValue;
         int allowed = Mathf.Clamp(cap - ConsolationPaidOnFloor[f], 0, raw);
 

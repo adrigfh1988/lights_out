@@ -11,7 +11,10 @@ public enum ShopItem
     ExtraLamps,
     StaminaTonic,
     TorchColour,
-    HudTint
+    HudTint,
+    BottlePack,
+    FocusLens,
+    FuseMap
 }
 
 /// <summary>What kind of thing a ShopItem is - drives how ShopMenu draws its card and how PlayerInventory holds it.</summary>
@@ -63,6 +66,14 @@ public static class ShopCatalogue
             Blurb = "Cold. Ember. Violet.", BasePrice = 50, Cap = 0 },
         new ShopItemDef { Id = ShopItem.HudTint, Kind = ItemKind.Cosmetic, Name = "HUD Tint",
             Blurb = "Phosphor. Amber. Ice.", BasePrice = 25, Cap = 0 },
+
+        // F75 shop depth.
+        new ShopItemDef { Id = ShopItem.BottlePack, Kind = ItemKind.FloorModifier, Name = "Bottle Pack",
+            Blurb = "Start the next floor already carrying three bottles.", BasePrice = 40, Cap = 1 },
+        new ShopItemDef { Id = ShopItem.FocusLens, Kind = ItemKind.FloorModifier, Name = "Focus Lens",
+            Blurb = "The focused beam reaches further, next floor, for no extra battery cost.", BasePrice = 35, Cap = 1 },
+        new ShopItemDef { Id = ShopItem.FuseMap, Kind = ItemKind.FloorModifier, Name = "Fuse Map",
+            Blurb = "Fuses, buttons, vaults and keys glow faintly. The compass points at them too.", BasePrice = 25, Cap = 1 },
     };
 
     public static ShopItemDef Get(ShopItem id)

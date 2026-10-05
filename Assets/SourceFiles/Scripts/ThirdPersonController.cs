@@ -144,7 +144,9 @@ public bool IsRespawning { get; set; } = false;
             get
             {
 #if ENABLE_INPUT_SYSTEM
-                return _playerInput.currentControlScheme == "KeyboardMouse";
+                // F76 T4: a touch drag feeds LookInput a pixel delta, exactly like a mouse, so it must
+                // skip the Time.deltaTime multiply below too - the only ThirdPersonController change.
+                return _playerInput.currentControlScheme == "KeyboardMouse" || (_input != null && _input.LookIsPixelDelta);
 #else
 				return false;
 #endif

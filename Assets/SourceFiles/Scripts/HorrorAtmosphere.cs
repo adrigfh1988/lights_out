@@ -25,6 +25,16 @@ public class HorrorAtmosphere : MonoBehaviour
     [Header("Post")]
     [Tooltip("The scene profile ships +0.2 exposure, which fights all of the above. This neutralises it on a runtime copy of the profile - the asset on disk is not touched.")]
     [SerializeField] private float postExposure = -0.2f;
+    [Tooltip("F71: crushes mid-tones so the ambient floor reads as inky rather than grey, on the same runtime profile copy as postExposure above.")]
+    [SerializeField] private float contrast = 20f;
+    [Tooltip("F71: Neutral keeps the torch's hot core readable against the crushed shadows below - ACES' filmic roll-off reads muddier once everything is this dark.")]
+    [SerializeField] private TonemappingMode tonemappingMode = TonemappingMode.Neutral;
+    [Tooltip("F71: darkens the screen edges so the beam's small lit circle reads as a circle, not a rectangle")]
+    [SerializeField] private float vignetteIntensity = 0.32f;
+    [Tooltip("How gradual the vignette's falloff is - low is a hard-edged circle, high fades in gently")]
+    [SerializeField] private float vignetteSmoothness = 0.4f;
+    [Tooltip("Tint of the vignette - black reads as darkness, not a colour cast")]
+    [SerializeField] private Color vignetteColor = Color.black;
 
     // Base values Darken lerps away from. Captured in Awake from the serialized defaults, then
     // overwritten by ApplyProfile if a floor profile is in use - either way Darken has a real base.
@@ -154,13 +164,31 @@ public class HorrorAtmosphere : MonoBehaviour
     {
         foreach (Volume volume in FindObjectsByType<Volume>(FindObjectsInactive.Exclude))
         {
-            // volume.profile (not sharedProfile) lazily clones the asset, so this edit lives only for
-            // this play session and leaves the .asset on disk clean.
-            if (volume.profile != null && volume.profile.TryGet(out ColorAdjustments colorAdjustments))
+            // volume.profile (not sharedProfile) lazily clones the asset, so every edit below lives only
+            // for this play session and leaves the .asset on disk clean.
+            if (volume.profile == null) continue;
+
+            if (volume.profile.TryGet(out ColorAdjustments colorAdjustments))
             {
                 colorAdjustments.postExposure.overrideState = true;
                 colorAdjustments.postExposure.value = postExposure;
+                colorAdjustments.contrast.overrideState = true;
+                colorAdjustments.contrast.value = contrast;
             }
+
+            // F71: Tonemapping/Vignette are not on the shipped profile at all (decision D13 - no asset
+            // YAML edits), so Add them to this runtime clone the first time through.
+            if (!volume.profile.TryGet(out Tonemapping tonemapping)) tonemapping = volume.profile.Add<Tonemapping>(true);
+            tonemapping.mode.overrideState = true;
+            tonemapping.mode.value = tonemappingMode;
+
+            if (!volume.profile.TryGet(out Vignette vignette)) vignette = volume.profile.Add<Vignette>(true);
+            vignette.intensity.overrideState = true;
+            vignette.intensity.value = vignetteIntensity;
+            vignette.smoothness.overrideState = true;
+            vignette.smoothness.value = vignetteSmoothness;
+            vignette.color.overrideState = true;
+            vignette.color.value = vignetteColor;
         }
     }
 }

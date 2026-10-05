@@ -41,11 +41,20 @@ public class WallLamp : MonoBehaviour
     private float _killFadeSeconds;
     private float _killTimer;
 
-    /// <summary>The light's range, used by ExposureAt.</summary>
+    // F73: Blackout floors start every lamp unpowered. A delayed SetPowered (the fuse box's ripple)
+    // is a simple countdown rather than a queue - only one power transition is ever pending at a time.
+    private bool _powered = true;
+    private float _powerDelayRemaining = -1f;
+    private bool _powerDelayTargetOn;
+
+    /// <summary>The light's range, used by LightPool.</summary>
     public float Range => _light != null ? _light.range : 0f;
 
-    /// <summary>0..1 fraction of base intensity after flicker/blink, updated every frame.</summary>
+    /// <summary>0..1 fraction of base intensity after flicker/blink, updated every frame. 0 while unpowered.</summary>
     public float CurrentIntensity01 { get; private set; } = 1f;
+
+    /// <summary>False while this lamp has no power (F73 Blackout floors, before its sector's fuse is restored).</summary>
+    public bool IsPowered => _powered;
 
     /// <summary>True once Kill's fade has finished. The lamp stays dark for the rest of the run.</summary>
     public bool IsDead { get; private set; }
@@ -72,6 +81,7 @@ public class WallLamp : MonoBehaviour
         _block = new MaterialPropertyBlock();
         IsLockerLamp = isLockerLamp;
         _configured = true;
+        _powered = true;
 
         if (_renderer != null && _renderer.sharedMaterial != null && _renderer.sharedMaterial.HasProperty("_EmissionColor"))
         {
@@ -79,6 +89,16 @@ public class WallLamp : MonoBehaviour
         }
 
         ScheduleNextDropout();
+
+        // F73: every lamp registers so LightPool.ExposureAt (PlayerStealthState's stealth exposure) sees
+        // it without MazeGenerator handing out its lamp list directly. Range is already final here - it
+        // is set on the Light before Configure runs in every one of BuildWallLamp's three branches.
+        LightPool.Register(transform, _light != null ? _light.range : 0f, () => CurrentIntensity01);
+    }
+
+    private void OnDestroy()
+    {
+        LightPool.Unregister(transform);
     }
 
     /// <summary>
@@ -105,13 +125,50 @@ public class WallLamp : MonoBehaviour
         _blinks.Add(new BlinkRequest { Delay = Mathf.Max(0f, delay), Duration = seconds });
     }
 
-    /// <summary>Starts a fade to permanently off. No-op on a locker lamp or one already dead/dying.</summary>
+    /// <summary>Starts a fade to permanently off. No-op on a locker lamp or one already dead/dying. Allowed while unpowered - it stays dead once powered back on (Update's unpowered branch returns before the dying fade runs).</summary>
     public void Kill(float fadeSeconds)
     {
         if (IsLockerLamp || IsDead || _dying) return;
         _dying = true;
         _killFadeSeconds = Mathf.Max(0.1f, fadeSeconds);
         _killTimer = 0f;
+    }
+
+    /// <summary>
+    /// F73: powers this lamp on or off. `delay` (the fuse box's BFS ripple, seconds) queues the change
+    /// instead of applying it immediately - only one transition is ever pending, so a plain countdown is
+    /// enough. Never touches IsDead/_dying either way: an unpowered lamp is simply dark, not killed, and
+    /// a killed lamp that gets powered back on resumes (and finishes) its fade instead of lighting up.
+    /// </summary>
+    public void SetPowered(bool on, float delay = 0f)
+    {
+        if (delay > 0f)
+        {
+            _powerDelayTargetOn = on;
+            _powerDelayRemaining = delay;
+            return;
+        }
+
+        ApplyPower(on);
+    }
+
+    private void ApplyPower(bool on)
+    {
+        if (on)
+        {
+            if (_powered) return;
+            _powered = true;
+            if (_light != null) _light.enabled = true;
+
+            // The power-on "strike": two quick blinks before settling to steady light. Queued through
+            // the same _blinks list Blink() uses, rather than a new coroutine.
+            _blinks.Add(new BlinkRequest { Delay = 0f, Duration = 0.08f });
+            _blinks.Add(new BlinkRequest { Delay = 0.16f, Duration = 0.08f });
+        }
+        else
+        {
+            _powered = false;
+        }
     }
 
     private void Update()
@@ -122,6 +179,32 @@ public class WallLamp : MonoBehaviour
         // Once dead, stay dead: without this the frame after the fade finishes falls through to the
         // waver below and the fixture glows again, which is the opposite of what Kill is for.
         if (IsDead) return;
+
+        if (_powerDelayRemaining >= 0f)
+        {
+            _powerDelayRemaining -= Time.deltaTime;
+            if (_powerDelayRemaining <= 0f)
+            {
+                _powerDelayRemaining = -1f;
+                ApplyPower(_powerDelayTargetOn);
+            }
+        }
+
+        if (!_powered)
+        {
+            // Dark, no flicker/dropout tick - a Blackout floor's lamp before its fuse is restored.
+            CurrentIntensity01 = 0f;
+            _light.intensity = 0f;
+            _light.enabled = false;
+
+            if (_renderer != null)
+            {
+                _renderer.GetPropertyBlock(_block);
+                _block.SetColor("_EmissionColor", Color.black);
+                _renderer.SetPropertyBlock(_block);
+            }
+            return;
+        }
 
         // Gentle waver on every lamp, 0.85..1.0
         float n = Mathf.PerlinNoise(Time.time * 6f + _phase, 0.3f);
@@ -197,29 +280,5 @@ public class WallLamp : MonoBehaviour
             _block.SetColor("_EmissionColor", _emissionBaseColor * k);
             _renderer.SetPropertyBlock(_block);
         }
-    }
-
-    /// <summary>How strongly point is lit by the nearest lamp that reaches it, 0..1.</summary>
-    public static float ExposureAt(IReadOnlyList<WallLamp> lamps, Vector3 point)
-    {
-        if (lamps == null) return 0f;
-
-        float best = 0f;
-        for (int i = 0; i < lamps.Count; i++)
-        {
-            WallLamp lamp = lamps[i];
-            if (lamp == null) continue;
-
-            float range = lamp.Range;
-            if (range <= 0f) continue;
-
-            float d = Vector3.Distance(lamp.transform.position, point);
-            if (d < range)
-            {
-                best = Mathf.Max(best, (1f - d / range) * lamp.CurrentIntensity01);
-            }
-        }
-
-        return best;
     }
 }

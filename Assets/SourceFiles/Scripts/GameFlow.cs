@@ -35,6 +35,11 @@ public static class GameFlow
     /// </summary>
     public static bool UseKitMaze;
 
+    /// <summary>F77: the mechanics pair each floor rolled this campaign, by floor (0 = not rolled yet). FloorProfile.RollObjectives
+    /// reads floor n-1's entry so two consecutive floors never roll the same pair; a Retry of floor n re-reads n-1 and lands on the
+    /// same pair. Campaign-scoped: reset here and in ResetStatics.</summary>
+    public static int[] RolledObjectives = new int[FloorProfile.FinalFloor + 1];
+
     public static void Restart(bool sameMaze, int currentSeed)
     {
         SkipMenuOnLoad = true;
@@ -66,6 +71,9 @@ public static class GameFlow
         PlayerWallet.ResetCampaign();
         PlayerInventory.ResetCampaign();
         DreadDirector.ResetCampaign();
+        LoreArchive.ResetCampaign();
+        RunRules.ResetCampaign();
+        System.Array.Clear(RolledObjectives, 0, RolledObjectives.Length);
         Reload();
     }
 
@@ -104,5 +112,6 @@ public static class GameFlow
         CurrentFloor = 1;
         IsInShop = false;
         UseKitMaze = false;
+        System.Array.Clear(RolledObjectives, 0, RolledObjectives.Length);
     }
 }

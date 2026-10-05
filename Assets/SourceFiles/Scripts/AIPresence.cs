@@ -23,7 +23,9 @@ public class AIPresence : MonoBehaviour
 
     [Header("Hum")]
     [SerializeField] private AudioClip humClip;
-    [SerializeField] private float humVolume = 0.25f;
+    [Tooltip("Use the synthesised stone-choir loop instead of humClip")]
+    [SerializeField] private bool useChoirHum = true;
+    [SerializeField] private float humVolume = 0.3f;
     [SerializeField] private float humPitch = 0.4f;
     [SerializeField] private float humMaxDistance = 14f;
 
@@ -82,10 +84,12 @@ public class AIPresence : MonoBehaviour
 
     private void Start()
     {
-        if (humClip != null)
+        // The scene's sci-fi loop, pitched down, read as radio static. The Weeping Angel gets a
+        // synthesised stone choir instead; the scene clip is only a fallback if that is switched off.
+        if (useChoirHum || humClip != null)
         {
-            _humSource.clip = humClip;
-            _humSource.pitch = humPitch;
+            _humSource.clip = useChoirHum ? AngelAudio.BuildChoirLoop() : humClip;
+            _humSource.pitch = useChoirHum ? 1f : humPitch;
             _humSource.volume = humVolume;
             _humSource.Play();
         }

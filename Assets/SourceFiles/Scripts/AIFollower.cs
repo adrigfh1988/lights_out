@@ -50,6 +50,10 @@ public class AIFollower : MonoBehaviour
     [SerializeField] private float loseSightTime = 3f;
     [Tooltip("Seconds between two line-of-sight tests")]
     [SerializeField] private float sightCheckInterval = 0.1f;
+    [Tooltip("F73: seconds between two torch-beam noise triggers, so standing in the player's beam does not spam HearNoise every sight tick")]
+    [SerializeField] private float torchBeamNoiseCooldown = 6f;
+    [Tooltip("F73: HearNoise radius when the player's torch beam catches the hunter")]
+    [SerializeField] private float torchBeamNoiseRadius = 40f;
 
     [Header("Escalation")]
     [Tooltip("Speed before a single star has been taken. Low enough to read as barely moving at all.")]
@@ -181,6 +185,9 @@ public class AIFollower : MonoBehaviour
     private State _state = State.Chase;
     // F36 Second Wind: no movement, no perception until Time.time passes this. -1 = not stunned.
     private float _stunnedUntil = -1f;
+    // F72: a closed MazeDoor held the hunter here. Unlike _stunnedUntil, perception keeps running -
+    // this only overrides movement, applied after the state machine each frame (see Update). -1 = not stalled.
+    private float _stallUntil = -1f;
     private bool _hasSight;
     private float _sightTimer;
     private float _lostSightTimer;
@@ -214,6 +221,12 @@ public class AIFollower : MonoBehaviour
     // resolved once in Start.
     private MazeGenerator _maze;
     private AIPresence _presence;
+
+    // F73: the player's torch and camera, bound once by MazeGenerator.SetUpAtmosphere (after both
+    // exist) so the hunter can notice the beam itself landing on it, not just what it lights up.
+    private Flashlight _torch;
+    private Transform _torchCamera;
+    private float _torchNoiseCooldownUntil = -1f;
 
     // Ambush (F45)
     private int _ambushStarIndex = -1;
@@ -342,6 +355,13 @@ public class AIFollower : MonoBehaviour
     public void SetAmbushProvider(MazeGenerator maze)
     {
         _maze = maze;
+    }
+
+    /// <summary>F73: called once by MazeGenerator.SetUpAtmosphere, after both exist. Either argument may be null.</summary>
+    public void BindTorch(Flashlight torch, Transform camera)
+    {
+        _torch = torch;
+        _torchCamera = camera;
     }
 
     /// <summary>
@@ -494,11 +514,14 @@ public class AIFollower : MonoBehaviour
     private void OnEnable()
     {
         Pickup.OnCollectedAt += HandleStarTakenAt;
+        // F75: registers as a loud door-breaker (slam + Stall) - see DoorBreakers and MazeDoor.CheckBash.
+        DoorBreakers.Register(transform, _agent, false, Stall);
     }
 
     private void OnDisable()
     {
         Pickup.OnCollectedAt -= HandleStarTakenAt;
+        DoorBreakers.Unregister(transform);
     }
 
     void Update()
@@ -543,7 +566,33 @@ public class AIFollower : MonoBehaviour
             UpdateStateMachine();
         }
 
+        // F72: applied after the state machine, so perception/targeting ran normally this frame and
+        // only the actual movement is overridden - a closed door holds the body, not the senses.
+        if (Time.time < _stallUntil)
+        {
+            _agent.isStopped = true;
+            _agent.velocity = Vector3.zero;
+        }
+
         UpdateAnimator();
+    }
+
+    /// <summary>F72: a closed MazeDoor bashed open and held the hunter here for `seconds`. The only AIFollower change this slice needed - see MazeDoor.CheckHunterBash.</summary>
+    public void Stall(float seconds)
+    {
+        _stallUntil = Mathf.Max(_stallUntil, Time.time + seconds);
+    }
+
+    /// <summary>
+    /// F75: the Stalker's touch forces the hunter to "know" the player is exactly here, on top of the
+    /// HearNoise it also calls - guarantees a search lands even where a HearNoise radius/path test could
+    /// technically miss. A no-op once captured, same guard as HearNoise.
+    /// </summary>
+    public void ForceLastKnownPosition(Vector3 position)
+    {
+        if (_state == State.Captured) return;
+        _lastKnownPosition = position;
+        if (_state != State.Chase) EnterSearch();
     }
 
     // ---------------------------------------------------------------- legacy behaviour
@@ -579,6 +628,29 @@ public class AIFollower : MonoBehaviour
         _sightTimer = sightCheckInterval;
 
         _hasSight = CanSeeTarget();
+        CheckTorchBeamNoise();
+    }
+
+    /// <summary>
+    /// F73 (B3.1): the hunter notices the player's torch beam landing on it, even without full sight -
+    /// angle/distance against the beam's own (blended, F71) shape, plus a plain LOS check, so it cannot
+    /// fire through a wall. Never overrides an active sighting (_hasSight already means something
+    /// stronger than this), and is cooled down so standing still in the beam does not spam HearNoise.
+    /// </summary>
+    private void CheckTorchBeamNoise()
+    {
+        if (_torch == null || _torchCamera == null || _hasSight || target == null) return;
+        if (!_torch.IsOn || Time.time < _torchNoiseCooldownUntil) return;
+
+        Vector3 camPos = _torchCamera.position;
+        Vector3 toHunter = (transform.position + Vector3.up * eyeHeight) - camPos;
+        float distance = toHunter.magnitude;
+        if (distance < 0.0001f || distance >= _torch.Range * 0.8f) return;
+        if (Vector3.Angle(_torchCamera.forward, toHunter) >= _torch.OuterAngle * 0.5f) return;
+        if (!HasLineOfSightIgnoring(camPos, transform.position + Vector3.up * eyeHeight, target)) return;
+
+        _torchNoiseCooldownUntil = Time.time + torchBeamNoiseCooldown;
+        HearNoise(target.position, torchBeamNoiseRadius);
     }
 
     /// <summary>
@@ -782,6 +854,43 @@ public class AIFollower : MonoBehaviour
         }
 
         return blocker == null || IsPartOf(blocker, target);
+    }
+
+    /// <summary>
+    /// F73: the reverse of HasLineOfSight above - cast from `from` (the player's camera) to `to` (a
+    /// point on the hunter), ignoring `ignoreNear`'s own colliders (the camera sits inside/near the
+    /// player's body) rather than the hunter's. True if nothing blocks, or the only blocker is the
+    /// hunter itself.
+    /// </summary>
+    private bool HasLineOfSightIgnoring(Vector3 from, Vector3 to, Transform ignoreNear)
+    {
+        Vector3 ray = to - from;
+        float distance = ray.magnitude;
+        if (distance < 0.0001f)
+        {
+            return true;
+        }
+
+        int count = Physics.RaycastNonAlloc(from, ray / distance, _sightHits, distance, ~0, QueryTriggerInteraction.Ignore);
+
+        float closest = float.MaxValue;
+        Transform blocker = null;
+        for (int i = 0; i < count; i++)
+        {
+            Transform hit = _sightHits[i].transform;
+            if (IsPartOf(hit, ignoreNear))
+            {
+                continue;
+            }
+
+            if (_sightHits[i].distance < closest)
+            {
+                closest = _sightHits[i].distance;
+                blocker = hit;
+            }
+        }
+
+        return blocker == null || IsPartOf(blocker, transform);
     }
 
     private static bool IsPartOf(Transform candidate, Transform root)

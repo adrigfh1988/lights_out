@@ -456,7 +456,8 @@ public class PhantomDirector : MonoBehaviour
         for (int i = 0; i < lamps.Count; i++)
         {
             WallLamp lamp = lamps[i];
-            if (lamp == null || lamp.IsDead) continue;
+            // F73: an unpowered lamp (Blackout floor, before its fuse) is already dark.
+            if (lamp == null || lamp.IsDead || !lamp.IsPowered) continue;
 
             float distance = Vector3.Distance(lamp.transform.position, _player.position);
             if (distance <= nearestDistance)

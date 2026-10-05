@@ -30,6 +30,7 @@ public class MainMenu : MonoBehaviour
 
     private GameObject _titleScreen;
     private GameObject _rulesScreen;
+    private TextMeshProUGUI _controlText;
     private Texture2D _generatedCover;
     private Sprite _generatedSprite;
     private Transform _player;
@@ -100,12 +101,27 @@ public class MainMenu : MonoBehaviour
 
     private void ShowRules()
     {
+        // F76: TouchControls' own -83 Update has not necessarily run yet this frame (this is an
+        // onClick callback), and the very first tap is exactly the case that needs Active to be
+        // current right now, not next frame - Poll() is idempotent per frame either way.
+        TouchInput.Poll();
+        if (_controlText != null) _controlText.text = ControlsText();
+
         _titleScreen.SetActive(false);
         _rulesScreen.SetActive(true);
     }
 
     private void StartGame()
     {
+        TouchInput.Poll();
+
+        // F76 T8: a fullscreen request needs a user gesture on the web, and this tap is one. iPhone
+        // Safari does not support it at all - ignore failure either way, nothing here depends on it.
+        if (TouchInput.Active)
+        {
+            try { Screen.fullScreen = true; } catch { /* best effort only */ }
+        }
+
         _menuOpen = false;
         _titleScreen.SetActive(false);
         _rulesScreen.SetActive(false);
@@ -116,6 +132,21 @@ public class MainMenu : MonoBehaviour
 
         GameFlow.RunStartTime = Time.time;
         GameFlow.IsRunActive = true;
+    }
+
+    /// <summary>F76 T6: shown instead of the keyboard/mouse control line while touch is active or the
+    /// platform is mobile (iPadOS Safari under-reports as desktop, so isMobilePlatform is checked too).</summary>
+    private static string ControlsText()
+    {
+        if (!TouchInput.Active && !Application.isMobilePlatform)
+        {
+            return "<b>WASD</b>  move   <b>SHIFT</b>  sprint   <b>MOUSE</b>  look   <b>F</b>  flashlight   <b>E</b>  hide / talk\n" +
+                   "<b>1</b>  spare battery   <b>2</b>  star compass   <b>ESC</b>  pause\n" +
+                   "<size=30>Your torch has three minutes of light in it. Your legs have less. Lockers hide you — unless it saw you climb in.</size>";
+        }
+
+        return "<b>LEFT THUMB</b>  move   <b>RIGHT THUMB</b>  look   buttons: <b>TORCH</b>, <b>FOCUS</b>, <b>INTERACT</b>, <b>THROW</b>, <b>SPRINT</b>\n" +
+               "<size=30>Your torch has three minutes of light in it. Your legs have less. Lockers hide you — unless it saw you climb in.</size>";
     }
 
     // ---------------------------------------------------------------- screens
@@ -177,13 +208,10 @@ public class MainMenu : MonoBehaviour
         body.alignment = TextAlignmentOptions.Left;
         RuntimeUi.Place(body.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, 60f), new Vector2(1100f, 380f));
 
-        string controls =
-            "<b>WASD</b>  move   <b>SHIFT</b>  sprint   <b>MOUSE</b>  look   <b>F</b>  flashlight   <b>E</b>  hide / talk\n" +
-            "<b>1</b>  spare battery   <b>2</b>  star compass   <b>ESC</b>  pause\n" +
-            "<size=30>Your torch has three minutes of light in it. Your legs have less. Lockers hide you — unless it saw you climb in.</size>";
-
-        TextMeshProUGUI controlText = RuntimeUi.CreateText(_rulesScreen.transform, "Controls", controls, 34f, new Color(0.62f, 0.62f, 0.66f));
-        RuntimeUi.Place(controlText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -210f), new Vector2(1400f, 170f));
+        // Text is filled in by ShowRules() (touch-aware - see ControlsText), not here: TouchInput.Active
+        // is not settled yet this early (Start runs before the first tap that could turn it on).
+        _controlText = RuntimeUi.CreateText(_rulesScreen.transform, "Controls", "", 34f, new Color(0.62f, 0.62f, 0.66f));
+        RuntimeUi.Place(_controlText.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -210f), new Vector2(1400f, 170f));
 
         Button start = RuntimeUi.CreateButton(_rulesScreen.transform, "START",
             new Vector2(0f, 150f), new Vector2(420f, 90f), 44f, buttonIdle, buttonHover, Color.white);

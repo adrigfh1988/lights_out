@@ -28,6 +28,7 @@ public class TensionDirector : MonoBehaviour
     private AIFollower _follower;
     private HorrorAudioDirector _audio;
     private PlayerHud _hud;
+    private KeyRing _keys;
 
     private TextMeshProUGUI _counter;
     private int _collected;
@@ -47,6 +48,15 @@ public class TensionDirector : MonoBehaviour
         _hud = hud;
     }
 
+    /// <summary>F77: the player's KeyRing, for the KEYS counter segment. Unsubscribes any previous ring first - CLAUDE.md's every-subscriber-unsubscribes rule.</summary>
+    public void BindKeyRing(KeyRing ring)
+    {
+        if (_keys != null) _keys.Changed -= Apply;
+        _keys = ring;
+        if (_keys != null) _keys.Changed += Apply;
+        Apply();
+    }
+
     /// <summary>Shop cosmetic (F35): recolours the calm end of the counter. The alarmed end is unchanged.</summary>
     public void SetCalmColor(Color color)
     {
@@ -57,6 +67,7 @@ public class TensionDirector : MonoBehaviour
     private void OnEnable()
     {
         GameManager.ProgressChanged += HandleProgress;
+        GameManager.ObjectivesChanged += Apply;
         GameManager.AllStarsCollected += HandleHatchOpen;
         Pickup.OnCollectedAt += HandleStarTaken;
     }
@@ -64,8 +75,10 @@ public class TensionDirector : MonoBehaviour
     private void OnDisable()
     {
         GameManager.ProgressChanged -= HandleProgress;
+        GameManager.ObjectivesChanged -= Apply;
         GameManager.AllStarsCollected -= HandleHatchOpen;
         Pickup.OnCollectedAt -= HandleStarTaken;
+        if (_keys != null) _keys.Changed -= Apply;
     }
 
     private void Start()
@@ -119,7 +132,20 @@ public class TensionDirector : MonoBehaviour
 
         if (_counter != null)
         {
-            _counter.text = $"{label}  {_collected} / {_total}";
+            string text = $"{label}  {_collected} / {_total}";
+            // F73: Blackout floors gate the hatch on fuses too - GameManager.TokensTotal is 0 on every
+            // other floor, so this leaves the text exactly as it was there.
+            if (GameManager.TokensTotal > 0)
+            {
+                text += $"   FUSES  {GameManager.TokensDone} / {GameManager.TokensTotal}";
+            }
+            // F77: KeyHunt floors append a third segment - 0 on every other floor (Total stays 0 until
+            // BuildKeys/KeyRing.Configure run), leaving this exactly as it was there.
+            if (_keys != null && _keys.Total > 0)
+            {
+                text += $"   KEYS  {_keys.Held} / {_keys.Total}";
+            }
+            _counter.text = text;
             _counter.color = Color.Lerp(calmColor, alarmedColor, progress);
         }
 
@@ -140,6 +166,9 @@ public class TensionDirector : MonoBehaviour
         rect.anchorMax = new Vector2(0f, 1f);
         rect.pivot = new Vector2(0f, 1f);
         rect.anchoredPosition = new Vector2(36f, -30f);
-        rect.sizeDelta = new Vector2(420f, 60f);
+        // Wide enough for F77's three-segment "STARS a / b   FUSES c / d   KEYS e / f", with wrapping off
+        // so a long line can never spill down onto the FLOOR label underneath.
+        rect.sizeDelta = new Vector2(1100f, 60f);
+        _counter.textWrappingMode = TextWrappingModes.NoWrap;
     }
 }

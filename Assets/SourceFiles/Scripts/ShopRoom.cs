@@ -26,7 +26,7 @@ public class ShopRoom : MonoBehaviour
     [SerializeField] private Collider counterZone;
     [Tooltip("Trigger volume in front of the door. Only its XZ footprint is used.")]
     [SerializeField] private Collider doorZone;
-    [Tooltip("The salesman's head. It turns to follow the player, within Head Yaw Limit of how it is facing here.")]
+    [Tooltip("The salesman's head: a plain pivot, or the head bone of an animated body. It turns to follow the player, within Head Yaw Limit of how it (or the animated body) is facing here.")]
     [SerializeField] private Transform headPivot;
     [Tooltip("The sign over the counter. Its alpha wavers.")]
     [SerializeField] private TextMeshPro counterSign;
@@ -49,7 +49,12 @@ public class ShopRoom : MonoBehaviour
     private bool _open;
     private bool _inCounter;
     private bool _inDoor;
+    // Head tracking works two ways: a plain pivot (rotated from its authored facing) or a bone under an Animator
+    // (rotated on top of that frame's animated pose). _headYawOffset is the smoothed turn in both cases.
     private float _headBaseYaw;
+    private float _headYawOffset;
+    private Quaternion _headBaseRotation;
+    private Animator _headAnimator;
 
     private AudioSource _hum;
     private AudioClip _humClip;
@@ -67,7 +72,13 @@ public class ShopRoom : MonoBehaviour
 
     private void Awake()
     {
-        if (headPivot != null) _headBaseYaw = headPivot.eulerAngles.y;
+        if (headPivot != null)
+        {
+            _headAnimator = headPivot.GetComponentInParent<Animator>();
+            _headBaseRotation = headPivot.rotation;
+            // A bone's own euler yaw means nothing, so an animated head takes its facing from the body.
+            _headBaseYaw = _headAnimator != null ? _headAnimator.transform.eulerAngles.y : headPivot.eulerAngles.y;
+        }
 
         _humClip = BuildShopHumClip();
         _hum = gameObject.GetComponent<AudioSource>();
@@ -112,12 +123,17 @@ public class ShopRoom : MonoBehaviour
     private void Update()
     {
         UpdateSignWaver();
-        if (headPivot != null) UpdateHeadTracking();
 
         if (!_open || !GameFlow.IsInShop || (_menu != null && _menu.IsOpen) || Time.timeScale <= 0f) return;
 
         UpdateZones();
         HandleInteract();
+    }
+
+    /// <summary>LateUpdate, so the turn lands after the Animator has written the idle pose for this frame.</summary>
+    private void LateUpdate()
+    {
+        if (headPivot != null) UpdateHeadTracking();
     }
 
     private void UpdateZones()
@@ -144,6 +160,7 @@ public class ShopRoom : MonoBehaviour
         if (Keyboard.current != null && Keyboard.current.eKey.wasPressedThisFrame) pressed = true;
         if (Gamepad.current != null && Gamepad.current.buttonWest.wasPressedThisFrame) pressed = true;
 #endif
+        if (TouchInput.Pressed(TouchInput.TouchAction.Interact)) pressed = true;
         if (!pressed) return;
 
         if (_inCounter) { if (_menu != null) _menu.Open(); }
@@ -161,10 +178,11 @@ public class ShopRoom : MonoBehaviour
         // World yaws throughout, so the room can be rotated or the salesman turned in the Editor.
         float wantedYaw = Mathf.Atan2(toPlayer.x, toPlayer.z) * Mathf.Rad2Deg;
         float delta = Mathf.Clamp(Mathf.DeltaAngle(_headBaseYaw, wantedYaw), -headYawLimit, headYawLimit);
-        float targetYaw = _headBaseYaw + delta;
+        _headYawOffset = Mathf.MoveTowards(_headYawOffset, delta, headTurnSpeed * Time.deltaTime);
 
-        float newYaw = Mathf.MoveTowardsAngle(headPivot.eulerAngles.y, targetYaw, headTurnSpeed * Time.deltaTime);
-        headPivot.rotation = Quaternion.Euler(0f, newYaw, 0f);
+        // An animated bone was just reset by the Animator; a plain pivot turns from where it was authored.
+        Quaternion pose = _headAnimator != null ? headPivot.rotation : _headBaseRotation;
+        headPivot.rotation = Quaternion.AngleAxis(_headYawOffset, Vector3.up) * pose;
     }
 
     private void UpdateSignWaver()

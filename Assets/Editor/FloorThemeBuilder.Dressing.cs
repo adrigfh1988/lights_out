@@ -340,6 +340,7 @@ public static partial class FloorThemeBuilder
         _commonDecalMats = null;
         _commonFloorProps = null;
         _fallenRunner = null;
+        _alchemistProps = null; // F79
     }
 
     private static CommonDecalMaterials? _commonDecalMats;
@@ -640,6 +641,7 @@ public static partial class FloorThemeBuilder
     {
         List<PropPiece> props = new List<PropPiece>();
         props.AddRange(BuildCommonFloorProps());
+        props.AddRange(KitPropFilter(BuildAlchemistProps(KitSet))); // F79
 
         CommonDecalMaterials common = GetCommonDecalMaterials();
         Material kitGrime = LoadOrCreateDecalMat(CommonRoot, "Kit_Grime", EnsureDecalTexture("Decal_Grime"), new Color(0.07f, 0.07f, 0.06f), 0.1f);

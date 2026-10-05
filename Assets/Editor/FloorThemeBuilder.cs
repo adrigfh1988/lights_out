@@ -572,6 +572,7 @@ public static partial class FloorThemeBuilder
         props.Add(FinishProp(syringesRoot, folder, PropPiece.MountKind.Floor, 0.3f, 0.7f));
 
         props.AddRange(BuildCommonFloorProps());
+        props.AddRange(BuildAlchemistProps(ThemeSets[0])); // F79
 
         CommonDecalMaterials wardCommonDecals = GetCommonDecalMaterials();
         Material wardGrimeMat = LoadOrCreateDecalMat(folder, "Ward_Grime", EnsureDecalTexture("Decal_Grime"), new Color(0.1f, 0.14f, 0.1f), 0.1f);
@@ -815,6 +816,7 @@ public static partial class FloorThemeBuilder
         props.Add(FinishProp(cobwebRoot, folder, PropPiece.MountKind.Ceiling, 0.5f, 1f));
 
         props.AddRange(BuildCommonFloorProps());
+        props.AddRange(BuildAlchemistProps(ThemeSets[2])); // F79
 
         CommonDecalMaterials cryptCommonDecals = GetCommonDecalMaterials();
         Material cryptGrimeMat = LoadOrCreateDecalMat(folder, "Crypt_Grime", EnsureDecalTexture("Decal_Grime"), new Color(0.08f, 0.1f, 0.06f), 0.05f);
@@ -1070,6 +1072,7 @@ public static partial class FloorThemeBuilder
         props.Add(FinishProp(oilCanRoot, folder, PropPiece.MountKind.Floor, 0.3f, 0.7f));
 
         props.AddRange(BuildCommonFloorProps());
+        props.AddRange(BuildAlchemistProps(ThemeSets[1])); // F79
 
         CommonDecalMaterials boilerCommonDecals = GetCommonDecalMaterials();
         Material boilerGrimeMat = LoadOrCreateDecalMat(folder, "Boiler_Grime", EnsureDecalTexture("Decal_Grime"), new Color(0.05f, 0.04f, 0.03f), 0.2f);
@@ -1322,6 +1325,7 @@ public static partial class FloorThemeBuilder
         props.Add(FinishProp(clipboardPileRoot, folder, PropPiece.MountKind.Floor, 0.3f, 1f));
 
         props.AddRange(BuildCommonFloorProps());
+        props.AddRange(BuildAlchemistProps(ThemeSets[3])); // F79
 
         CommonDecalMaterials labCommonDecals = GetCommonDecalMaterials();
         Material labGrimeMat = LoadOrCreateDecalMat(folder, "Lab_Grime", EnsureDecalTexture("Decal_Grime"), new Color(0.1f, 0.15f, 0.13f), 0.2f);
@@ -1569,6 +1573,7 @@ public static partial class FloorThemeBuilder
         props.Add(FinishProp(clothNestRoot, folder, PropPiece.MountKind.Floor, 0.45f, 1f));
 
         props.AddRange(BuildCommonFloorProps());
+        props.AddRange(BuildAlchemistProps(ThemeSets[4])); // F79
 
         // Hollow doubles Handprint/ClawMarks weight (decision, plan section 3.2).
         CommonDecalMaterials hollowCommonDecals = GetCommonDecalMaterials();

@@ -84,8 +84,9 @@ public static class PlayerInventory
         if (p == null) return;
         if (HasActive(ShopItem.LongFuse)) p.EscapeSeconds += 10f;
         if (HasActive(ShopItem.StaminaTonic)) p.SprintSeconds += 4f;
-        // 5->3, 4->3, 3->2, 2->2
-        if (HasActive(ShopItem.ExtraLamps)) p.CellsPerLamp = Mathf.Max(2, Mathf.CeilToInt(p.CellsPerLamp * 0.6f));
+        // F71: CellsPerLamp got sparser (5..8, was 2..3), so the old floor of 2 no longer reads as
+        // "extra" - 3 is the new minimum spacing this perk guarantees.
+        if (HasActive(ShopItem.ExtraLamps)) p.CellsPerLamp = Mathf.Max(3, Mathf.CeilToInt(p.CellsPerLamp * 0.6f));
         if (HasActive(ShopItem.QuietShoes)) p.NoiseScale = 0.7f;
     }
 

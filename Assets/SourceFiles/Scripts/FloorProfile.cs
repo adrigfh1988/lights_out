@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using UnityEngine;
 
 /// <summary>
@@ -84,6 +85,86 @@ public class FloorProfile
         return index >= 0 && index < FloorThemes.Length ? FloorThemes[index] : floor;
     }
 
+    // F72: doors, buttons and vaults are per-floor tables, like Footprints, not a first/final blend -
+    // each floor's mix of "how many things gate progress" is hand-picked. Floor 1's one manual door
+    // teaches the mechanic before anything is locked behind it.
+    private static readonly int[] ManualDoorsTable = { 1, 2, 2, 3, 3 };
+    private static readonly int[] SecurityDoorsTable = { 0, 2, 1, 3, 1 };
+    private static readonly int[] VaultsTable = { 0, 1, 1, 1, 1 };
+
+    /// <summary>
+    /// F77: what a floor is actually about, beyond "collect the stars", as a flag set - every floor from
+    /// FirstRolledFloor on rolls MechanicsPerFloor of these three, a pure function of (UsedSeed, floor)
+    /// so a Retry keeps its pair (see RollObjectives). Stars are no longer a flag: they are always
+    /// present, so None means "no extra mechanic" (floor 1, the teaching floor). Lockdown means the F72
+    /// door/button table plus one Timed door. Blackout means the lights start off and FuseCount fuse
+    /// boxes have to be found to bring them back. KeyHunt means KeyCount brass keys have to be found
+    /// before the hatch/lift will complete (see MazeEscape's padlock).
+    /// </summary>
+    [System.Flags]
+    public enum Objective { None = 0, Lockdown = 1, Blackout = 2, KeyHunt = 4 }
+
+    /// <summary>F77 user decision 4 Oct 2026, "only 2 objectives per floor": how many of the three mechanics a rolled floor gets.</summary>
+    public const int MechanicsPerFloor = 2;
+    /// <summary>First floor that rolls mechanics; floor 1 stays stars-only as the teaching floor.</summary>
+    public const int FirstRolledFloor = 2;
+
+    private static int TableFor(int[] table, int floor, int fallback)
+    {
+        int index = floor - 1;
+        return index >= 0 && index < table.Length ? table[index] : fallback;
+    }
+
+    /// <summary>
+    /// F77: picks this floor's mechanics pair, a pure function of (usedSeed, floor) salted apart from
+    /// RunRules' own roll ("KEYS" = 0x4B455953), so the two never correlate. Builds every MechanicsPerFloor-
+    /// sized combination of the pool from a bitmask loop (not hard-coded), shuffles it with that seed, and
+    /// picks the first entry that is not the pair the previous floor rolled (GameFlow.RolledObjectives),
+    /// so two consecutive floors are never identical. Writes the result back to RolledObjectives[floor].
+    /// </summary>
+    private static Objective RollObjectives(int floor, int usedSeed)
+    {
+        if (floor < FirstRolledFloor) return Objective.None;
+
+        Objective[] singles = { Objective.Lockdown, Objective.Blackout, Objective.KeyHunt };
+        List<Objective> pairs = new List<Objective>();
+        int comboCount = 1 << singles.Length;
+        for (int mask = 1; mask < comboCount; mask++)
+        {
+            int popcount = 0;
+            Objective combo = Objective.None;
+            for (int bit = 0; bit < singles.Length; bit++)
+            {
+                if ((mask & (1 << bit)) == 0) continue;
+                popcount++;
+                combo |= singles[bit];
+            }
+            if (popcount == MechanicsPerFloor) pairs.Add(combo);
+        }
+
+        int hash = RunRules.HashSeedFloor(usedSeed ^ unchecked((int)0x4B455953), floor);
+        System.Random rng = new System.Random(hash);
+        for (int i = pairs.Count - 1; i > 0; i--)
+        {
+            int j = rng.Next(i + 1);
+            (pairs[i], pairs[j]) = (pairs[j], pairs[i]);
+        }
+
+        int[] rolled = GameFlow.RolledObjectives;
+        int previous = floor - 1 >= 1 && floor - 1 < rolled.Length ? rolled[floor - 1] : 0;
+
+        Objective chosen = pairs[0];
+        for (int i = 0; i < pairs.Count; i++)
+        {
+            if ((int)pairs[i] == previous) continue;
+            chosen = pairs[i];
+            break;
+        }
+
+        if (floor < rolled.Length) rolled[floor] = (int)chosen;
+        return chosen;
+    }
+
     public int Floor { get; private set; }
 
     /// <summary>0 on the first floor, 1 on the final one.</summary>
@@ -134,6 +215,21 @@ public class FloorProfile
     public float NoiseScale = 1f;
 
     // ---- ambush (F45)
+    // ---- doors, buttons and vaults (F72)
+    public int ManualDoors;
+    public int SecurityDoors;
+    public int Vaults;
+    public bool HasTimedDoor;
+
+    // ---- objective (F73, flags since F77)
+    public Objective Objectives;
+    /// <summary>True when `o` is one of this floor's rolled (or forced) mechanics.</summary>
+    public bool Has(Objective o) => (Objectives & o) != 0;
+    /// <summary>Blackout only; 0 on every other floor.</summary>
+    public int FuseCount;
+    /// <summary>KeyHunt only; 0 on every other floor.</summary>
+    public int KeyCount;
+
     /// <summary>Chance a wander leg becomes an ambush. Read raw - see AIFollower.EffectiveAmbushBias.</summary>
     public float AmbushBias;
     /// <summary>Maximum time lying in wait.</summary>
@@ -141,7 +237,28 @@ public class FloorProfile
     /// <summary>Hearing multiplier while lying in wait.</summary>
     public float AmbushHearingBoost;
 
-    public static FloorProfile For(int floor)
+    // ---- hunter temperament (F74, B3.2)
+    /// <summary>One line for the floor intro banner, e.g. "It hunts by sound here." Empty on a floor with no temperament twist.</summary>
+    public string TemperamentText = "";
+
+    // ---- the Stalker (F75, decision D7)
+    /// <summary>True on floors 4 and 5 - MazeGenerator.BuildStalker gates on this.</summary>
+    public bool HasStalker;
+
+    /// <summary>
+    /// Base profile, no mechanics rolled (Objectives = None). F77 decision 3: only PlayerWallet.
+    /// ComputeConsolation should use this overload - the consolation cap is deliberately on the base
+    /// star count, not a KeyHunt/Blackout-trimmed one (slightly generous on a trimmed floor; harmless).
+    /// Everything else should go through the seeded overload below.
+    /// </summary>
+    public static FloorProfile For(int floor) => For(floor, 0, Objective.None);
+
+    /// <summary>
+    /// F77: usedSeed makes the mechanics roll a pure function of (seed, floor), so a Retry keeps its
+    /// floor's pair. `forced` overrides the roll entirely (MazeGenerator's debugObjectives) - pass null to
+    /// roll normally, or Objective.None explicitly to roll nothing (see the seedless For() above).
+    /// </summary>
+    public static FloorProfile For(int floor, int usedSeed, Objective? forced = null)
     {
         floor = Mathf.Clamp(floor, 1, FinalFloor);
         float t = FinalFloor > 1 ? (floor - 1) / (float)(FinalFloor - 1) : 1f;
@@ -170,15 +287,35 @@ public class FloorProfile
         }
         p.StarCount = Blend(2, 5, t);
         p.LockerCount = Blend(5, 10, t);
-        // Final-floor lamps were 1 per 5 cells at 1.1 - too dark to read the maze once F27 has killed
-        // two waves of them. Denser and a little brighter; the fog still hides the far end of a hall.
-        p.CellsPerLamp = Blend(2, 3, t);
-        p.LampIntensity = Blend(1.9f, 1.5f, t);
-        p.LampRange = Blend(9f, 8f, t);
 
-        float ambient = Blend(0.10f, 0.035f, t);
+        // F77: every floor from FirstRolledFloor on rolls MechanicsPerFloor of {Lockdown, Blackout,
+        // KeyHunt} from the seed (RollObjectives), or `forced` overrides it (MazeGenerator debug field).
+        // Blackout and KeyHunt each trade some of the floor's stars for their own objective - the
+        // lights/keys themselves are the point, so the full star count on top would run long past D1's
+        // per-floor time budget. One Max(2, ...) after both trims, not one per branch.
+        p.Objectives = forced ?? RollObjectives(floor, usedSeed);
+        if (p.Has(Objective.Blackout))
+        {
+            p.FuseCount = 3;
+            p.StarCount -= 2;
+        }
+        if (p.Has(Objective.KeyHunt))
+        {
+            p.KeyCount = floor <= 3 ? 2 : 3;
+            p.StarCount -= 1;
+        }
+        p.StarCount = Mathf.Max(2, p.StarCount);
+        // F71 darkness pass: lamps are sparser, dimmer and shorter-range than the old tuning, so floor 1
+        // has real pockets of dark between lamp pools (the torch is optional there) and floor 5 is
+        // unreadable without it. Ambient/fog follow the same curve. See
+        // plannings/darkness-and-interactivity-spec.md, decision D2 and slice F71.
+        p.CellsPerLamp = Blend(5, 8, t);
+        p.LampIntensity = Blend(1.0f, 0.7f, t);
+        p.LampRange = Blend(5.0f, 4.0f, t);
+
+        float ambient = Blend(0.015f, 0.006f, t);
         p.Ambient = new Color(ambient, ambient, ambient * 1.25f);
-        p.FogDensity = Blend(0.03f, 0.07f, t);
+        p.FogDensity = Blend(0.07f, 0.12f, t);
 
         // 3x slower drain than the original 14 -> 8 s tuning (bar-flavor unchanged, just lasts longer).
         p.SprintSeconds = Blend(42f, 24f, t);
@@ -201,9 +338,38 @@ public class FloorProfile
 
         p.ShardCount = Blend(4, 8, t);
 
+        p.ManualDoors = TableFor(ManualDoorsTable, floor, 1);
+        p.SecurityDoors = TableFor(SecurityDoorsTable, floor, 0);
+        p.Vaults = TableFor(VaultsTable, floor, 0);
+        // F73/F77: folded into Objectives - Lockdown means the door/button table above plus one Timed door.
+        p.HasTimedDoor = p.Has(Objective.Lockdown);
+
         p.AmbushBias = Blend(0.35f, 0.75f, t);
         p.AmbushWaitSeconds = Blend(40f, 90f, t);
         p.AmbushHearingBoost = Blend(1.5f, 1.5f, t);
+
+        // F74 hunter temperament (B3.2): per-floor multipliers layered on top of the blend above, plus
+        // the banner's one-line flavour text. Every other floor is untouched (implicit x1, no line).
+        if (floor == 3)
+        {
+            p.ViewDistance *= 0.6f;
+            p.HearingScale *= 1.5f;
+            p.TemperamentText = "It hunts by sound here.";
+        }
+        else if (floor == 4)
+        {
+            p.RunSpeed *= 1.15f;
+            p.LoseSightTime *= 0.6f;
+            p.TemperamentText = "It is fast here, but forgets quickly.";
+        }
+        else
+        {
+            p.TemperamentText = "";
+        }
+
+        // F75, decision D7: the Stalker appears on the last two floors only - by then the hunter alone
+        // has had time to establish what "the one thing chasing you" feels like.
+        p.HasStalker = floor >= 4;
 
         return p;
     }
@@ -212,7 +378,7 @@ public class FloorProfile
     {
         return $"floor {Floor}/{FinalFloor}: {Width}x{Height}, cell {CellSize:0.0} wall {WallHeight:0.0}, {StarCount} stars, {LockerCount} lockers, " +
                $"hunter walk {WalkSpeed:0.0} run {RunSpeed:0.0} sees {ViewDistance:0}m, escape {EscapeSeconds:0}s, {ShardCount} shards, " +
-               $"ambush {AmbushBias:0.00}";
+               $"ambush {AmbushBias:0.00}, objectives {Objectives}";
     }
 
     private static float Blend(float first, float final, float t) => Mathf.Lerp(first, final, t);

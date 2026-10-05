@@ -45,6 +45,7 @@ public class Locker : MonoBehaviour, IHidingSpot
     private PlayerStealthState _stealth;
     private Flashlight _flashlight;
     private PlayerHud _hud;
+    private PlayerInteractor _interactor;
     private ThirdPersonController _controller;
 
     private bool _playerInTrigger;
@@ -65,12 +66,13 @@ public class Locker : MonoBehaviour, IHidingSpot
     }
 
     /// <summary>Called by MazeGenerator.SetUpAtmosphere once the player and HUD exist.</summary>
-    public void Bind(Transform player, PlayerStealthState stealth, Flashlight flashlight, PlayerHud hud)
+    public void Bind(Transform player, PlayerStealthState stealth, Flashlight flashlight, PlayerHud hud, PlayerInteractor interactor)
     {
         _player = player;
         _stealth = stealth;
         _flashlight = flashlight;
         _hud = hud;
+        _interactor = interactor;
         _controller = player != null ? player.GetComponent<ThirdPersonController>() : null;
     }
 
@@ -84,8 +86,13 @@ public class Locker : MonoBehaviour, IHidingSpot
 #else
         bool pressed = false;
 #endif
+        pressed |= TouchInput.Pressed(TouchInput.TouchAction.Interact);
 
         if (!pressed || !GameFlow.IsRunActive || GameOutcome.IsOver) return;
+
+        // F72 decision D12: a closer/more specific interactable (door, button, vault loot) wins the
+        // press over hiding. Leaving a locker you are already inside always works regardless.
+        if (!Occupied && _interactor != null && _interactor.HasFocus) return;
 
         if (Occupied) Leave();
         else if (_playerInTrigger) Enter();

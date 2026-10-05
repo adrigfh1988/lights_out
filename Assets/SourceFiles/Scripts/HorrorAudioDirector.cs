@@ -42,8 +42,6 @@ public class HorrorAudioDirector : MonoBehaviour
     [SerializeField] private float droneVolumeAtPeak = 0.3f;
     [Tooltip("The drone creeps upward in pitch as things get worse")]
     [SerializeField] private float dronePitchAtPeak = 0.72f;
-    [Tooltip("Volume of the synthesised dissonant bed at full progress. It is silent at zero.")]
-    [SerializeField] private float tensionVolume = 0.45f;
     [Tooltip("The heartbeat starts carrying from further away as progress climbs")]
     [SerializeField] private float heartbeatRangeAtPeak = 28f;
 
@@ -67,7 +65,6 @@ public class HorrorAudioDirector : MonoBehaviour
     private AudioSource _oneShots;
     private AudioSource _sting;
     private AudioSource _drone;
-    private AudioSource _tension;
     private AudioSource _whisper;
     private AudioClip _heartbeat;
     private AudioClip _relocationCue;
@@ -83,7 +80,10 @@ public class HorrorAudioDirector : MonoBehaviour
         _player = player;
         _follower = follower;
         if (follower != null) _hunter = follower.transform;
-        if (sting != null) stingClip = sting;
+        // The Weeping Angel's own synthesised sting always wins over whatever clip MazeGenerator hands over
+        stingClip = AngelAudio.BuildSting();
+        stingPitch = 1f;
+        stingDuration = 2.5f;
         if (drone != null) droneClip = drone;
         if (panic != null) panicClip = panic;
     }
@@ -98,11 +98,6 @@ public class HorrorAudioDirector : MonoBehaviour
         {
             _drone.volume = Mathf.Lerp(droneVolume, droneVolumeAtPeak, _intensity);
             _drone.pitch = Mathf.Lerp(dronePitch, dronePitchAtPeak, _intensity);
-        }
-
-        if (_tension != null)
-        {
-            _tension.volume = tensionVolume * _intensity;
         }
     }
 
@@ -126,7 +121,6 @@ public class HorrorAudioDirector : MonoBehaviour
     public void Silence()
     {
         if (_drone != null) _drone.Stop();
-        if (_tension != null) _tension.Stop();
         if (_sting != null) _sting.Stop();
         if (_oneShots != null) _oneShots.Stop();
         if (_whisper != null) _whisper.Stop();
@@ -155,11 +149,10 @@ public class HorrorAudioDirector : MonoBehaviour
         _drone.loop = true;
         _drone.spatialBlend = 0f;
 
-        _tension = gameObject.AddComponent<AudioSource>();
-        _tension.playOnAwake = false;
-        _tension.loop = true;
-        _tension.spatialBlend = 0f;
-        _tension.volume = 0f;
+        // There used to be a fourth source here, a synthesised "tension bed" (two detuned 55 Hz tones
+        // beating against each other, swelling with star progress). Removed 4 Oct 2026: it read as a
+        // buzz that got louder before the last star. Escalation is now the drone's volume/pitch and the
+        // heartbeat's range alone.
 
         // Its own 2D source: PlayWhisper drives panStereo directly, which would yank a concurrent
         // heartbeat sideways if they shared a source.
@@ -195,9 +188,6 @@ public class HorrorAudioDirector : MonoBehaviour
             _drone.volume = droneVolume;
             _drone.Play();
         }
-
-        _tension.clip = BuildTensionBedClip();
-        _tension.Play();
     }
 
     private void OnDisable()
@@ -256,7 +246,6 @@ public class HorrorAudioDirector : MonoBehaviour
     public void PlayCaptureSting()
     {
         if (_drone != null) _drone.Stop();
-        if (_tension != null) _tension.Stop();
         if (stingClip == null || _sting == null) return;
 
         _sting.clip = stingClip;
@@ -266,11 +255,10 @@ public class HorrorAudioDirector : MonoBehaviour
         _sting.SetScheduledEndTime(AudioSettings.dspTime + 2.5f);
     }
 
-    /// <summary>After PlayCaptureSting stopped the bed for a Second Wind: bring the drone and tension back at their current intensity.</summary>
+    /// <summary>After PlayCaptureSting stopped the bed for a Second Wind: bring the drone back at its current intensity.</summary>
     public void ResumeBed()
     {
         if (_drone != null && _drone.clip != null && !_drone.isPlaying) _drone.Play();
-        if (_tension != null && _tension.clip != null && !_tension.isPlaying) _tension.Play();
         SetIntensity(_intensity);
     }
 
@@ -303,7 +291,7 @@ public class HorrorAudioDirector : MonoBehaviour
     }
 
     /// <summary>
-    /// F27's last-star beat: the drone and tension bed drop to silence, held, then restored over the
+    /// F27's last-star beat: the drone drops to silence, held, then restored over the
     /// final 0.6 s. Restores toward whatever SetIntensity/BeginPanic would want right now, not a value
     /// captured at the start, so a panic transition landing mid-hold is not undone by the restore.
     /// </summary>
@@ -326,7 +314,6 @@ public class HorrorAudioDirector : MonoBehaviour
             if (!enabled || GameOutcome.IsOver) yield break;
 
             if (_drone != null) _drone.volume = 0f;
-            if (_tension != null) _tension.volume = 0f;
             t += Time.deltaTime;
             yield return null;
         }
@@ -338,9 +325,7 @@ public class HorrorAudioDirector : MonoBehaviour
 
             float k = Mathf.Clamp01(t / restoreSeconds);
             float droneTarget = _panicking ? panicVolume : Mathf.Lerp(droneVolume, droneVolumeAtPeak, _intensity);
-            float tensionTarget = tensionVolume * _intensity;
             if (_drone != null) _drone.volume = Mathf.Lerp(0f, droneTarget, k);
-            if (_tension != null) _tension.volume = Mathf.Lerp(0f, tensionTarget, k);
             t += Time.deltaTime;
             yield return null;
         }
@@ -348,7 +333,6 @@ public class HorrorAudioDirector : MonoBehaviour
         if (!enabled || GameOutcome.IsOver) yield break;
 
         if (_drone != null) _drone.volume = _panicking ? panicVolume : Mathf.Lerp(droneVolume, droneVolumeAtPeak, _intensity);
-        if (_tension != null) _tension.volume = tensionVolume * _intensity;
         _holdBreathRoutine = null;
     }
 
@@ -376,48 +360,6 @@ public class HorrorAudioDirector : MonoBehaviour
         }
 
         AudioClip clip = AudioClip.Create("Heartbeat", sampleCount, 1, sampleRate, false);
-        clip.SetData(samples, 0);
-        return clip;
-    }
-
-    /// <summary>
-    /// The rising-dread bed, also built from scratch. Two pairs of detuned low tones beat against each
-    /// other a few times a second, which the ear reads as something wrong rather than as music.
-    ///
-    /// Every frequency is a multiple of 0.25 Hz and the clip is exactly four seconds, so each one
-    /// completes a whole number of cycles and the loop point is silent.
-    /// </summary>
-    private static AudioClip BuildTensionBedClip()
-    {
-        const int sampleRate = 44100;
-        const float duration = 4f;
-
-        int sampleCount = Mathf.RoundToInt(sampleRate * duration);
-        float[] samples = new float[sampleCount];
-
-        for (int i = 0; i < sampleCount; i++)
-        {
-            float t = i / (float)sampleRate;
-
-            // 55 against 58.25 beats about three times a second - a slow, uneasy throb
-            float value = 0.5f * Mathf.Sin(2f * Mathf.PI * 55f * t)
-                        + 0.5f * Mathf.Sin(2f * Mathf.PI * 58.25f * t)
-                        + 0.18f * Mathf.Sin(2f * Mathf.PI * 110f * t)
-                        + 0.18f * Mathf.Sin(2f * Mathf.PI * 116.5f * t)
-                        + 0.10f * Mathf.Sin(2f * Mathf.PI * 233f * t);
-
-            samples[i] = value;
-        }
-
-        float peak = 0f;
-        for (int i = 0; i < sampleCount; i++) peak = Mathf.Max(peak, Mathf.Abs(samples[i]));
-        if (peak > 0.0001f)
-        {
-            float gain = 0.7f / peak;
-            for (int i = 0; i < sampleCount; i++) samples[i] *= gain;
-        }
-
-        AudioClip clip = AudioClip.Create("TensionBed", sampleCount, 1, sampleRate, false);
         clip.SetData(samples, 0);
         return clip;
     }

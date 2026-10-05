@@ -62,6 +62,14 @@ public class PlayerHud : MonoBehaviour
     private float _slot1Punch;
     private float _slot2Punch;
 
+    // F74: throwable carry count, stacked above the two consumable slots.
+    private static readonly Color ThrowColour = new Color(0.85f, 0.78f, 0.6f);
+    private TextMeshProUGUI _throwText;
+    private ThrowController _throwController;
+
+    /// <summary>Called by MazeGenerator.SetUpAtmosphere. May be null (an incomplete InteractableKit skips throwables entirely).</summary>
+    public void BindThrowController(ThrowController controller) => _throwController = controller;
+
     /// <summary>Called by ConsumableController right after a consumable is used: flashes the slot white and punches it.</summary>
     public void PulseSlot(int index)
     {
@@ -76,10 +84,40 @@ public class PlayerHud : MonoBehaviour
         _stamina = stamina;
     }
 
-    /// <summary>Called by Locker on enter/exit/trigger. Null or empty hides the prompt.</summary>
+    // F72 decision D12: PlayerInteractor's focus prompt overrides Locker's own trigger prompt while set,
+    // so the two never fight over the same line - see RefreshPrompt.
+    private string _triggerPrompt;
+    private string _focusPrompt;
+
+    /// <summary>Called by Locker on enter/exit/trigger. Null or empty hides the prompt (unless a focus prompt is showing).</summary>
     public void SetPrompt(string text)
     {
+        _triggerPrompt = text;
+        RefreshPrompt();
+    }
+
+    /// <summary>Called every frame by PlayerInteractor. Null or empty falls back to the trigger prompt.</summary>
+    public void SetFocusPrompt(string text)
+    {
+        _focusPrompt = text;
+        RefreshPrompt();
+    }
+
+    /// <summary>F76: the resolved prompt (focus overrides trigger, same rule RefreshPrompt uses), for
+    /// TouchControls' INTERACT button label. Null/empty when nothing is shown.</summary>
+    public string CurrentPrompt => !string.IsNullOrEmpty(_focusPrompt) ? _focusPrompt : _triggerPrompt;
+
+    private void RefreshPrompt()
+    {
         if (_promptText == null) return;
+        // F76 T6: the INTERACT button shows this same text itself while touch is active, so the
+        // keyboard-shaped prompt line ("E  HIDE") underneath the crosshair would just be a duplicate.
+        if (TouchInput.Active)
+        {
+            _promptText.gameObject.SetActive(false);
+            return;
+        }
+        string text = CurrentPrompt;
         bool show = !string.IsNullOrEmpty(text);
         _promptText.gameObject.SetActive(show);
         if (show) _promptText.text = text;
@@ -222,6 +260,11 @@ public class PlayerHud : MonoBehaviour
         _slot2Text = RuntimeUi.CreateText(canvas.transform, "Slot2", "2   COMPASS  x0", 24f, _tint);
         _slot2Text.alignment = TextAlignmentOptions.Right;
         PlaceBottomRight(_slot2Text.rectTransform, new Vector2(-20f, 20f), new Vector2(360f, 34f));
+
+        _throwText = RuntimeUi.CreateText(canvas.transform, "ThrowSlot", "G   THROW  x0", 24f, ThrowColour);
+        _throwText.alignment = TextAlignmentOptions.Right;
+        PlaceBottomRight(_throwText.rectTransform, new Vector2(-20f, 146f), new Vector2(360f, 34f));
+        _throwText.gameObject.SetActive(false);
     }
 
     private static void PlaceBottomRight(RectTransform rect, Vector2 anchoredPosition, Vector2 size)
@@ -239,6 +282,7 @@ public class PlayerHud : MonoBehaviour
         UpdateStamina();
         UpdateShardCounter();
         UpdateItemSlots();
+        RefreshPrompt(); // F76: keeps the prompt line's touch-mode visibility current every frame too
     }
 
     private void UpdateItemSlots()
@@ -251,18 +295,26 @@ public class PlayerHud : MonoBehaviour
         _slot1Text.gameObject.SetActive(!inShop);
         _slot2Text.gameObject.SetActive(!inShop);
         if (_secondWindText != null) _secondWindText.gameObject.SetActive(!inShop && secondWindHeld);
+        if (_throwText != null && inShop) _throwText.gameObject.SetActive(false);
         if (inShop) return;
 
         _slot1Punch = Mathf.MoveTowards(_slot1Punch, 0f, Time.unscaledDeltaTime / 0.25f);
         _slot2Punch = Mathf.MoveTowards(_slot2Punch, 0f, Time.unscaledDeltaTime / 0.25f);
 
         int batteryCount = PlayerInventory.Count(ShopItem.SpareBattery);
-        _slot1Text.text = $"1   BATTERY  x{batteryCount}";
+        _slot1Text.text = $"{TouchInput.Key("1", "TAP")}   BATTERY  x{batteryCount}";
         ApplySlot(_slot1Text, batteryCount > 0, _slot1Punch);
 
         int compassCount = PlayerInventory.Count(ShopItem.StarCompass);
-        _slot2Text.text = $"2   COMPASS  x{compassCount}";
+        _slot2Text.text = $"{TouchInput.Key("2", "TAP")}   COMPASS  x{compassCount}";
         ApplySlot(_slot2Text, compassCount > 0, _slot2Punch);
+
+        if (_throwText != null)
+        {
+            int carried = _throwController != null ? _throwController.Carried : 0;
+            _throwText.gameObject.SetActive(carried > 0);
+            if (carried > 0) _throwText.text = $"{TouchInput.Key("G", "TAP")}   THROW  x{carried}";
+        }
     }
 
     private void ApplySlot(TextMeshProUGUI text, bool has, float punch)

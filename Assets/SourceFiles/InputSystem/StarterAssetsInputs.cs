@@ -20,6 +20,11 @@ namespace StarterAssets
 		public bool cursorLocked = true;
 		public bool cursorInputForLook = true;
 
+		/// <summary>F76: set true by TouchControls while touch is active. A touch drag feeds a pixel
+		/// delta into LookInput, like a mouse, so ThirdPersonController.IsCurrentDeviceMouse checks this
+		/// too - otherwise the look delta would get multiplied by Time.deltaTime a second time.</summary>
+		public bool LookIsPixelDelta;
+
 
 
 #if ENABLE_INPUT_SYSTEM
@@ -85,10 +90,11 @@ namespace StarterAssets
 
 		private void SetCursorState(bool newState)
 		{
-			Cursor.lockState = newState ? CursorLockMode.Locked : CursorLockMode.None;
-			Cursor.visible = !newState;  
-			
-
+			// F76 T5: a browser pointer lock does nothing useful on a tablet and can eat taps, so
+			// "locked" means "unlocked" while touch drives the game instead of the mouse.
+			bool locked = newState && !TouchInput.Active;
+			Cursor.lockState = locked ? CursorLockMode.Locked : CursorLockMode.None;
+			Cursor.visible = !locked;
 		}
 	}
 	

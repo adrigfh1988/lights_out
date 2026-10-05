@@ -8,7 +8,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 
 /// <summary>
-/// LIGHTS OUT &gt; Build Hunter Body (F47, second attempt). Swaps whatever is under AI_Follower - the
+/// LIGHTS OUT &gt; Build Hunter Body (F47, second attempt). Swaps whatever is under Weeping_Angel - the
 /// placeholder Timmy robot, or the missing-prefab zombie from the first attempt - for an instance of
 /// Adam from the Adam Character Pack, used as-is: no importer edits, no material, no rescale (the pack
 /// already ships a correctly rigged, textured, unit-scaled Humanoid).
@@ -42,7 +42,7 @@ public static class HunterBodyBuilder
     private const float EyeHeightPadding = 0.10f;
 
     // F50: written into AIFollower alongside animator/eyeHeight/modelFacingYaw below. The scene's
-    // AI_Follower is a pre-existing object with its own serialized values baked into the scene YAML
+    // Weeping_Angel is a pre-existing object with its own serialized values baked into the scene YAML
     // (acceleration 14, turnSpeed 540, animationBlendRate 10) - a new C# field default only applies to an
     // object that has never had that field serialized before, so decision 10's "mannequin" fix has to be
     // written the same way eyeHeight already is, or it never takes effect on this scene.
@@ -85,7 +85,7 @@ public static class HunterBodyBuilder
         AIFollower aiFollower = UnityEngine.Object.FindAnyObjectByType<AIFollower>();
         if (aiFollower == null)
         {
-            EditorUtility.DisplayDialog("Build Hunter Body", "No AIFollower found in the scene (looked for AI_Follower).", "OK");
+            EditorUtility.DisplayDialog("Build Hunter Body", "No AIFollower found in the scene (looked for Weeping_Angel).", "OK");
             return;
         }
         Transform aiRoot = aiFollower.transform;
@@ -155,7 +155,7 @@ public static class HunterBodyBuilder
         if (existingBody != null)
         {
             if (!EditorUtility.DisplayDialog("Build Hunter Body",
-                    "AI_Follower already has a HunterBody child. Replace it?", "Replace", "Cancel"))
+                    "Weeping_Angel already has a HunterBody child. Replace it?", "Replace", "Cancel"))
             {
                 return;
             }
@@ -166,8 +166,8 @@ public static class HunterBodyBuilder
         if (robotChild != null)
         {
             if (!EditorUtility.DisplayDialog("Build Hunter Body",
-                    $"Remove the Timmy robot body ('{robotChild.name}') from AI_Follower? It will be replaced by Adam. " +
-                    "To restore it later, drag PlayerRobot.prefab back under AI_Follower (Ctrl+Z right after this also restores it, in one step).",
+                    $"Remove the Timmy robot body ('{robotChild.name}') from Weeping_Angel? It will be replaced by Adam. " +
+                    "To restore it later, drag PlayerRobot.prefab back under Weeping_Angel (Ctrl+Z right after this also restores it, in one step).",
                     "Remove", "Cancel"))
             {
                 return;
@@ -207,7 +207,7 @@ public static class HunterBodyBuilder
         // Humanoid: the body faces the Animator's own +Z, so there is nothing to measure - unlike the
         // Generic zombie rig, whose node could face any which way inside its own transform.
         so.FindProperty("modelFacingYaw").floatValue = 0f;
-        // F50 decision 10: the scene's AI_Follower already has its own serialized acceleration/turnSpeed/
+        // F50 decision 10: the scene's Weeping_Angel already has its own serialized acceleration/turnSpeed/
         // animationBlendRate values baked in from before this feature, so the "mannequin" fix has to be
         // written here, the same way eyeHeight already is, or a new C# field default never takes effect.
         so.FindProperty("acceleration").floatValue = DefaultAcceleration;
@@ -731,7 +731,7 @@ public static class HunterBodyBuilder
     /// Instantiates Adam at the world origin, assigns the freshly built controller so Animator.Update(0f)
     /// poses him at the blend tree's idle (Speed defaults to 0), and reads back the Humanoid Head bone's
     /// world Y - which, at the origin with identity rotation/scale, is exactly the height AIFollower.eyeHeight
-    /// needs once the body is parented under AI_Follower. Destroys the temporary instance before returning.
+    /// needs once the body is parented under Weeping_Angel. Destroys the temporary instance before returning.
     /// </summary>
     private static float MeasureHeadHeight(GameObject prefabAsset, AnimatorController controller, out bool ok)
     {
@@ -767,7 +767,7 @@ public static class HunterBodyBuilder
     // ---------------------------------------------------------------- scene lookup
 
     /// <summary>
-    /// The direct child of AI_Follower whose prefab source is PlayerRobot.prefab (matched by filename,
+    /// The direct child of Weeping_Angel whose prefab source is PlayerRobot.prefab (matched by filename,
     /// not by a hardcoded GUID - the project has two copies of the prefab at different paths). Skips the
     /// NavMesh Link child. Returns null if there is none (e.g. the swap already ran).
     /// </summary>
