@@ -34,6 +34,9 @@ public class SaveData
 
     // DreadDirector
     public bool ambushSubtitleShown;
+
+    // F87 ContractState. Ids are stored +1 so a save written before F87 (fields missing, read as 0) means "none".
+    public int contractActivePlus1, contractFloor, contractOfferAPlus1, contractOfferBPlus1;
 }
 
 /// <summary>
@@ -151,6 +154,7 @@ public static class SaveSystem
             PlayerInventory.CaptureTo(d);
             LoreArchive.CaptureTo(d);
             DreadDirector.CaptureTo(d);
+            ContractState.CaptureTo(d);
 
             Store.Write(JsonUtility.ToJson(d));
         }
@@ -184,6 +188,7 @@ public static class SaveSystem
         PlayerInventory.RestoreFrom(d);
         LoreArchive.RestoreFrom(d);
         DreadDirector.RestoreFrom(d);
+        ContractState.RestoreFrom(d);
 
         GameFlow.CurrentFloor = d.floor;
         GameFlow.UseKitMaze = d.useKitMaze;

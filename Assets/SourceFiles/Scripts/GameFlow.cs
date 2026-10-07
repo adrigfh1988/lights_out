@@ -29,6 +29,33 @@ public static class GameFlow
     public static bool IsInShop;
 
     /// <summary>
+    /// F86: true while the player is in the Intake (the playable tutorial room before floor 1). Like the shop it is
+    /// not a run (IsRunActive stays false: hunter, Stan, dread, phantoms and the escape timer stay inert), but unlike
+    /// the shop the interactor, throwing and lockers all work - they are what it teaches. Reset in Reload (which every
+    /// path out of the Intake goes through), ResetStatics and ReturnToMenu.
+    /// </summary>
+    public static bool IsInIntake;
+
+    /// <summary>F86: a safe room that is not a run - the HUD star counter, shard counter and consumable slots stay hidden. Readers that must stay ON in the Intake test IsInIntake explicitly instead.</summary>
+    public static bool IsInSafeRoom => IsInShop || IsInIntake;
+
+    /// <summary>F86: PlayerPrefs flag set once the Intake has been finished or skipped. Only changes wording ("Welcome back"); the Intake is still offered every new campaign.</summary>
+    public const string TutorialDoneKey = "lightsout.tutorial.done";
+
+    public static bool TutorialDone
+    {
+        get { try { return PlayerPrefs.GetInt(TutorialDoneKey, 0) == 1; } catch { return false; } }
+        set { try { PlayerPrefs.SetInt(TutorialDoneKey, value ? 1 : 0); PlayerPrefs.Save(); } catch { /* best effort */ } }
+    }
+
+    /// <summary>The one place a run begins: stamps the run clock and switches IsRunActive on. Shared by MainMenu.StartGame, the no-title-screen path and leaving the Intake.</summary>
+    public static void BeginRun()
+    {
+        RunStartTime = Time.time;
+        IsRunActive = true;
+    }
+
+    /// <summary>
     /// F48: build the next maze from the Maze Modular Puzzle Kit instead of the FloorThemes gallery.
     /// Lasts the campaign - set once by START NEW MAZE, cleared only by ReturnToMenu (and the
     /// SubsystemRegistration reset). Read by MazeGenerator.ResolveKitTheme in Awake.
@@ -81,6 +108,7 @@ public static class GameFlow
         DreadDirector.ResetCampaign();
         LoreArchive.ResetCampaign();
         RunRules.ResetCampaign();
+        ContractState.ResetCampaign();
         System.Array.Clear(RolledObjectives, 0, RolledObjectives.Length);
         Reload();
     }
@@ -101,6 +129,7 @@ public static class GameFlow
     {
         IsRunActive = false;
         IsInShop = false;
+        IsInIntake = false;
         // Restart can be called from the pause menu with both engaged. MainMenu.Awake zeroes the
         // clock again in the new scene anyway.
         Time.timeScale = 1f;
@@ -119,6 +148,7 @@ public static class GameFlow
         IsRunActive = false;
         CurrentFloor = 1;
         IsInShop = false;
+        IsInIntake = false;
         UseKitMaze = false;
         ResumeInShop = false;
         System.Array.Clear(RolledObjectives, 0, RolledObjectives.Length);

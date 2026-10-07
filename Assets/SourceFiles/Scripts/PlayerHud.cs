@@ -289,13 +289,24 @@ public class PlayerHud : MonoBehaviour
     {
         if (_slot1Text == null) return;
 
-        bool inShop = GameFlow.IsInShop;
+        // F86: the Intake hides the consumable slots like the shop does, but the THROW line stays - it is taught there.
+        bool inShop = GameFlow.IsInSafeRoom;
         bool secondWindHeld = PlayerInventory.Count(ShopItem.SecondWind) > 0;
 
         _slot1Text.gameObject.SetActive(!inShop);
         _slot2Text.gameObject.SetActive(!inShop);
         if (_secondWindText != null) _secondWindText.gameObject.SetActive(!inShop && secondWindHeld);
-        if (_throwText != null && inShop) _throwText.gameObject.SetActive(false);
+        if (_throwText != null && GameFlow.IsInShop) _throwText.gameObject.SetActive(false);
+        if (GameFlow.IsInIntake)
+        {
+            if (_throwText != null)
+            {
+                int held = _throwController != null ? _throwController.Carried : 0;
+                _throwText.gameObject.SetActive(held > 0);
+                if (held > 0) _throwText.text = $"{TouchInput.Key("G", "TAP")}   THROW  x{held}";
+            }
+            return;
+        }
         if (inShop) return;
 
         _slot1Punch = Mathf.MoveTowards(_slot1Punch, 0f, Time.unscaledDeltaTime / 0.25f);
@@ -331,7 +342,7 @@ public class PlayerHud : MonoBehaviour
     {
         if (_shardText == null) return;
 
-        if (GameFlow.IsInShop)
+        if (GameFlow.IsInSafeRoom)
         {
             _shardText.gameObject.SetActive(false);
             return;

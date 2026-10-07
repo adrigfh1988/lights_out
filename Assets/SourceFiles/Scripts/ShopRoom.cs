@@ -26,6 +26,8 @@ public class ShopRoom : MonoBehaviour
     [SerializeField] private Collider counterZone;
     [Tooltip("Trigger volume in front of the door. Only its XZ footprint is used.")]
     [SerializeField] private Collider doorZone;
+    [Tooltip("F87: trigger volume in front of the contract board. Only its XZ footprint is used. Empty = no board (LIGHTS OUT > Build Missing Pieces adds it).")]
+    [SerializeField] private Collider contractZone;
     [Tooltip("The salesman's head: a plain pivot, or the head bone of an animated body. It turns to follow the player, within Head Yaw Limit of how it (or the animated body) is facing here.")]
     [SerializeField] private Transform headPivot;
     [Tooltip("The sign over the counter. Its alpha wavers.")]
@@ -61,6 +63,7 @@ public class ShopRoom : MonoBehaviour
     private bool _open;
     private bool _inCounter;
     private bool _inDoor;
+    private bool _inBoard;
     // Head tracking works two ways: a plain pivot (rotated from its authored facing) or a bone under an Animator
     // (rotated on top of that frame's animated pose). _headYawOffset is the smoothed turn in both cases.
     private float _headBaseYaw;
@@ -77,6 +80,9 @@ public class ShopRoom : MonoBehaviour
 
     /// <summary>True once the room has the parts it needs to work. False = the builder has not been run.</summary>
     public bool IsComplete => arrivalPoint != null && counterZone != null && doorZone != null;
+
+    /// <summary>F87: true once the contract board has been added to this room (ShopRoomBuilder.AddContractBoard).</summary>
+    public bool HasContractBoard => contractZone != null;
 
     /// <summary>Called by MazeGenerator.SetUpAtmosphere. Everything physical already exists in the scene.</summary>
     public void Configure(Transform player, PlayerHud hud, ShopMenu menu)
@@ -110,7 +116,7 @@ public class ShopRoom : MonoBehaviour
             _doorwayCentre = leaf.size == Vector3.zero ? doorHinge.position : leaf.center;
         }
 
-        _humClip = BuildShopHumClip();
+        _humClip = BuildHumClip();
         _hum = gameObject.GetComponent<AudioSource>();
         if (_hum == null) _hum = gameObject.AddComponent<AudioSource>();
         _hum.playOnAwake = false;
@@ -146,8 +152,10 @@ public class ShopRoom : MonoBehaviour
         _open = true;
         _inCounter = false;
         _inDoor = false;
+        _inBoard = false;
         if (_hum != null) _hum.Play();
-        if (_hud != null) _hud.ShowSubtitle(GreetingFor(GameFlow.CurrentFloor), 3f);
+        // F87: after a contract was paid or failed the salesman says so instead of the usual greeting.
+        if (_hud != null) _hud.ShowSubtitle(ContractState.TakeSalesmanLine() ?? GreetingFor(GameFlow.CurrentFloor), 3f);
     }
 
     private void Update()
@@ -172,13 +180,16 @@ public class ShopRoom : MonoBehaviour
 
         bool inCounter = ContainsXZ(counterZone, _player.position);
         bool inDoor = ContainsXZ(doorZone, _player.position);
-        if (inCounter == _inCounter && inDoor == _inDoor) return;
+        bool inBoard = !inCounter && ContainsXZ(contractZone, _player.position);
+        if (inCounter == _inCounter && inDoor == _inDoor && inBoard == _inBoard) return;
 
         _inCounter = inCounter;
         _inDoor = inDoor;
+        _inBoard = inBoard;
         if (_hud == null) return;
 
         if (_inCounter) _hud.SetPrompt("E  TALK");
+        else if (_inBoard) _hud.SetPrompt($"{TouchInput.Key("E", "USE")}  CONTRACTS");
         else if (_inDoor) _hud.SetPrompt("E  DESCEND");
         else _hud.SetPrompt(null);
     }
@@ -194,6 +205,7 @@ public class ShopRoom : MonoBehaviour
         if (!pressed) return;
 
         if (_inCounter) { if (_menu != null) _menu.Open(); }
+        else if (_inBoard) { if (_menu != null) _menu.OpenContracts(); }
         else if (_inDoor) Descend();
     }
 
@@ -425,7 +437,7 @@ public class ShopRoom : MonoBehaviour
     }
 
     /// <summary>4 s of two low sines with a slow amplitude wobble - the pattern every synthesised clip in this project follows.</summary>
-    private static AudioClip BuildShopHumClip()
+    internal static AudioClip BuildHumClip()
     {
         const int sampleRate = 44100;
         const float duration = 4f;

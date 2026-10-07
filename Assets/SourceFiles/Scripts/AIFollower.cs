@@ -527,8 +527,23 @@ public class AIFollower : MonoBehaviour
         DoorBreakers.Unregister(transform);
     }
 
+    // F86: the Intake runs the clock with the hunter still standing in the maze behind it.
+    private bool _heldForIntake;
+
     void Update()
     {
+        if (GameFlow.IsInIntake)
+        {
+            if (_agent != null && _agent.isOnNavMesh) _agent.isStopped = true;
+            _heldForIntake = true;
+            return;
+        }
+        if (_heldForIntake)
+        {
+            _heldForIntake = false;
+            if (_agent != null && _agent.isOnNavMesh) _agent.isStopped = false;
+        }
+
         if (target == null)
         {
             FindTarget();
@@ -712,7 +727,7 @@ public class AIFollower : MonoBehaviour
     /// </summary>
     public bool HearNoise(Vector3 at, float radius)
     {
-        if (_agent == null || !_agent.isOnNavMesh || _state == State.Captured) return false;
+        if (_agent == null || !_agent.isOnNavMesh || _state == State.Captured || GameFlow.IsInIntake) return false;
 
         // Unconditional, not gated by hearing: TensionDirector's own Pickup.OnCollectedAt subscription
         // (added earlier, in MazeGenerator.Awake) calls this for the very same position before this

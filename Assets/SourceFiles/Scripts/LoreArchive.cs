@@ -14,6 +14,8 @@ public static class LoreArchive
     /// <summary>True the first time this id is marked read this campaign; false on every later call for the same id.</summary>
     public static bool MarkRead(int noteId)
     {
+        // F86: negative ids (the Intake's note) are never recorded - no shard bonus, nothing in a save.
+        if (noteId < 0) return false;
         return ReadIds.Add(noteId);
     }
 

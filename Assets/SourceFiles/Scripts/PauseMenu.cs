@@ -23,6 +23,7 @@ public class PauseMenu : MonoBehaviour
 
     private GameObject _panel;
     private Button _restartButton;
+    private Button _skipButton;
     private bool _paused;
     /// <summary>Last frame the cursor was locked and a pause was allowed. See the lock-loss check in Update.</summary>
     private bool _wasLockedAndPausable;
@@ -99,7 +100,7 @@ public class PauseMenu : MonoBehaviour
     private bool CanPause()
     {
         // The shop is a third phase (decision 5): not a run, but pausing still works there.
-        if (!GameFlow.IsRunActive && !GameFlow.IsInShop) return false;
+        if (!GameFlow.IsRunActive && !GameFlow.IsInShop && !GameFlow.IsInIntake) return false;
         if (_menu != null && _menu.IsOpen) return false;
         if (GameOutcome.IsOver) return false;
         if (_outcome != null && _outcome.IsEnding) return false;
@@ -121,7 +122,9 @@ public class PauseMenu : MonoBehaviour
 
         if (_panel == null) BuildPanel();
         // Replaying a cleared floor from the shop would re-earn its payout (decision 4c).
-        if (_restartButton != null) _restartButton.gameObject.SetActive(!GameFlow.IsInShop);
+        if (_restartButton != null) _restartButton.gameObject.SetActive(!GameFlow.IsInShop && !GameFlow.IsInIntake);
+        // F86: only the Intake offers a way out of itself.
+        if (_skipButton != null) _skipButton.gameObject.SetActive(GameFlow.IsInIntake);
         _panel.SetActive(true);
         _panel.transform.SetAsLastSibling();
 
@@ -138,8 +141,20 @@ public class PauseMenu : MonoBehaviour
 
         PlayerLock.Freeze(_player, false);
         // The shop is lit; the torch stays off and disabled there for the whole phase.
-        if (_flashlight != null) _flashlight.InputEnabled = !GameFlow.IsInShop;
+        // F86: in the Intake the torch is only usable once the tutorial has handed it over (IntakeRoom.TorchAllowed).
+        if (_flashlight != null)
+        {
+            _flashlight.InputEnabled = !GameFlow.IsInShop && (!GameFlow.IsInIntake || (IntakeRoom.Active != null && IntakeRoom.Active.TorchAllowed));
+        }
         PlayerLock.SetCursorFree(false);
+    }
+
+    /// <summary>F86: leave the Intake straight into floor 1, the same way finishing it does.</summary>
+    private void SkipTutorial()
+    {
+        IntakeRoom room = IntakeRoom.Active;
+        Resume();
+        if (room != null) room.Skip();
     }
 
     private void OnDestroy()
@@ -171,6 +186,12 @@ public class PauseMenu : MonoBehaviour
         _restartButton = RuntimeUi.CreateButton(_panel.transform, "RESTART MAZE",
             new Vector2(0f, 290f), size, 40f, ButtonIdle, ButtonHover, Color.white);
         _restartButton.onClick.AddListener(() => GameFlow.Restart(true, _seed));
+
+        // F86: SKIP TUTORIAL shares the RESTART slot - the two are never shown together (see Pause).
+        _skipButton = RuntimeUi.CreateButton(_panel.transform, "SKIP TUTORIAL",
+            new Vector2(0f, 290f), size, 40f, ButtonIdle, ButtonHover, Color.white);
+        _skipButton.onClick.AddListener(SkipTutorial);
+        _skipButton.gameObject.SetActive(false);
 
         Button menu = RuntimeUi.CreateButton(_panel.transform, "MAIN MENU",
             new Vector2(0f, 180f), size, 40f, ButtonIdle, ButtonHover, Color.white);

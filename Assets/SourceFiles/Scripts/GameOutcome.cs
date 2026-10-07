@@ -48,6 +48,7 @@ public class GameOutcome : MonoBehaviour
     private MazeGenerator _maze;
     private PlayerHud _hud;
     private PlayerStealthState _stealth;
+    private ContractTracker _contracts;
     private bool _showingLedger;
     private bool _continuePressed;
 
@@ -88,6 +89,9 @@ public class GameOutcome : MonoBehaviour
         _hud = hud;
         _stealth = stealth;
     }
+
+    /// <summary>F87: the floor's contract checker. May stay null; every use is guarded.</summary>
+    public void BindContracts(ContractTracker contracts) => _contracts = contracts;
 
     private void Awake()
     {
@@ -243,6 +247,10 @@ public class GameOutcome : MonoBehaviour
         _shop.ArrivePlayer(_player);
 
         Payout payout = PlayerWallet.ComputeFloorClear(GameFlow.CurrentFloor, _collected, secondsLeft);
+        // F87: the taken contract is decided and paid in this same payout; then the shop's board gets its two offers for the next floor
+        // (rolled before the checkpoint below, so a shop resume shows the same pair).
+        if (_contracts != null) _contracts.AppendTo(payout);
+        ContractState.RollOffers(_seed, GameFlow.CurrentFloor);
         PlayerWallet.Deposit(payout);
         // F83: shop-arrival checkpoint, with the payout banked. Resumes straight into the shop.
         SaveSystem.WriteCheckpoint(GameFlow.CurrentFloor, true);
@@ -344,7 +352,7 @@ public class GameOutcome : MonoBehaviour
             label.alignment = TextAlignmentOptions.Left;
             RuntimeUi.Place(label.rectTransform, new Vector2(0.5f, 1f), new Vector2(-100f, y), new Vector2(900f, 50f));
 
-            string amountText = informational ? "already yours" : $"+{line.Amount}";
+            string amountText = informational ? "already yours" : line.Amount == 0 && line.Label.StartsWith("CONTRACT") ? "no pay" : $"+{line.Amount}";
             TextMeshProUGUI amount = RuntimeUi.CreateText(root, "Amount", amountText, 36f, lineColor);
             amount.alignment = TextAlignmentOptions.Right;
             RuntimeUi.Place(amount.rectTransform, new Vector2(0.5f, 1f), new Vector2(420f, y), new Vector2(300f, 50f));
@@ -405,6 +413,7 @@ public class GameOutcome : MonoBehaviour
 
         float secondsLeft = _escape != null ? _escape.TimeLeft : 0f;
         _floorPayout = PlayerWallet.ComputeFloorClear(GameFlow.CurrentFloor, _collected, secondsLeft);
+        if (_contracts != null) _contracts.AppendTo(_floorPayout); // F87: floor 5 pays its contract on the win screen
         PlayerWallet.Deposit(_floorPayout);
         // F83: the campaign is over. Guarded on the final floor so the no-shop fallback (a plain Win on floors 1-4) keeps its save.
         if (GameFlow.CurrentFloor >= FloorProfile.FinalFloor) SaveSystem.Delete();

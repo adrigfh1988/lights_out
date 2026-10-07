@@ -88,7 +88,7 @@ public class Locker : MonoBehaviour, IHidingSpot
 #endif
         pressed |= TouchInput.Pressed(TouchInput.TouchAction.Interact);
 
-        if (!pressed || !GameFlow.IsRunActive || GameOutcome.IsOver) return;
+        if (!pressed || !(GameFlow.IsRunActive || GameFlow.IsInIntake) || GameOutcome.IsOver) return;
 
         // F72 decision D12: a closer/more specific interactable (door, button, vault loot) wins the
         // press over hiding. Leaving a locker you are already inside always works regardless.

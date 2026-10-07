@@ -952,8 +952,12 @@ public class Stalker : MonoBehaviour
     /// <summary>"It shrieked" - the hunter hears the exact position and its search always lands here,
     /// the torch loses a quarter of its charge, and a subtitle sells the beat. Never captures, never
     /// touches GameOutcome.</summary>
+    /// <summary>F87: raised on every touch, for ContractTracker's Not a scratch contract.</summary>
+    public static event System.Action PlayerTouched;
+
     private void Touch()
     {
+        PlayerTouched?.Invoke();
         if (_audio != null && _shriekClip != null) _audio.PlayOneShot(_shriekClip, 1f);
 
         _hunter.HearNoise(_player.position, 40f);

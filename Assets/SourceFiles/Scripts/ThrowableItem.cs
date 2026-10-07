@@ -92,9 +92,14 @@ public class ThrowableItem : MonoBehaviour, IInteractable
         Impact(point);
     }
 
+    /// <summary>F87: raised when a thrown item's noise was heard by a hunter that was not already chasing - ContractTracker's Make some noise contract.</summary>
+    public static event System.Action HunterInvestigated;
+
     private void Impact(Vector3 point)
     {
-        _hunter?.HearNoise(point, 18f);
+        bool wasChasing = _hunter != null && _hunter.IsChasing;
+        bool heard = _hunter != null && _hunter.HearNoise(point, 18f);
+        if (heard && !wasChasing) HunterInvestigated?.Invoke();
 
         if (kind == Kind.Bottle)
         {

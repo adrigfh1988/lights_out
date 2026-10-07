@@ -43,10 +43,19 @@ public class ThrowController : MonoBehaviour
         _canTemplate = canTemplate;
         _glassPatchTemplate = glassPatchTemplate;
 
+        ClearCarried();
+    }
+
+    /// <summary>
+    /// Back to the floor's starting load: empty, or (F75 Bottle Pack) 3 bottles. Configure calls it; F86's Intake calls it
+    /// on the way out so a bottle it taught the player to throw is not carried into floor 1.
+    /// </summary>
+    public void ClearCarried()
+    {
+        _carried.Clear();
         // F75 shop item: Bottle Pack starts the floor already carrying 3 bottles.
         if (PlayerInventory.HasActive(ShopItem.BottlePack))
         {
-            _carried.Clear();
             for (int i = 0; i < MaxCarried; i++) _carried.Add(ThrowableItem.Kind.Bottle);
         }
     }
@@ -76,7 +85,7 @@ public class ThrowController : MonoBehaviour
     private bool IsActive()
     {
         if (Time.timeScale <= 0f) return false;
-        if (!GameFlow.IsRunActive || GameOutcome.IsOver || GameFlow.IsInShop) return false;
+        if (!(GameFlow.IsRunActive || GameFlow.IsInIntake) || GameOutcome.IsOver || GameFlow.IsInShop) return false;
         if (_stealth != null && _stealth.Hidden) return false; // no throwing from inside a locker
         return true;
     }

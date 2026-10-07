@@ -77,8 +77,142 @@ public class ShopMenu : MonoBehaviour
         _closedFrame = Time.frameCount;
 
         if (_panel != null) _panel.SetActive(false);
+        if (_contractPanel != null) _contractPanel.SetActive(false);
         PlayerLock.Freeze(_player, false);
         PlayerLock.SetCursorFree(false);
+    }
+
+    // ---------------------------------------------------------------- F87: the contract board's panel
+
+    private GameObject _contractPanel;
+    private readonly TextMeshProUGUI[] _offerName = new TextMeshProUGUI[2];
+    private readonly TextMeshProUGUI[] _offerText = new TextMeshProUGUI[2];
+    private readonly TextMeshProUGUI[] _offerReward = new TextMeshProUGUI[2];
+    private readonly Button[] _offerButton = new Button[2];
+    private readonly TextMeshProUGUI[] _offerButtonLabel = new TextMeshProUGUI[2];
+    private TextMeshProUGUI _contractStatus;
+    private Button _declineButton;
+
+    /// <summary>
+    /// F87: E at the contract board. The same panel machinery as the shop (IsOpen / ClosedThisFrame, so PauseMenu and
+    /// TouchControls already treat it as a menu): two offers for the next floor, TAKE one, DECLINE, or BACK.
+    /// </summary>
+    public void OpenContracts()
+    {
+        if (IsOpen) return;
+        IsOpen = true;
+
+        if (_contractPanel == null) BuildContractPanel();
+        if (_contractPanel != null)
+        {
+            _contractPanel.SetActive(true);
+            _contractPanel.transform.SetAsLastSibling();
+        }
+        RefreshContracts();
+
+        PlayerLock.Freeze(_player, true);
+        PlayerLock.SetCursorFree(true);
+    }
+
+    private void BuildContractPanel()
+    {
+        RuntimeUi.EnsureEventSystem();
+        Canvas canvas = RuntimeUi.ResolveCanvas();
+        if (canvas == null) return;
+
+        _contractPanel = RuntimeUi.CreatePanel(canvas.transform, "ContractScreen", new Color(0.02f, 0.02f, 0.03f, 0.94f));
+
+        TextMeshProUGUI title = RuntimeUi.CreateText(_contractPanel.transform, "Title", "CONTRACTS", 64f, Amber);
+        title.fontStyle = FontStyles.Bold;
+        title.characterSpacing = 10f;
+        RuntimeUi.Place(title.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -90f), new Vector2(1400f, 90f));
+
+        TextMeshProUGUI tip = RuntimeUi.CreateText(_contractPanel.transform, "Tip", "Optional work for the next floor. One at a time. Paid on the ledger when you clear it.", 26f, Grey);
+        RuntimeUi.Place(tip.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -160f), new Vector2(1500f, 44f));
+
+        float[] xs = { -380f, 380f };
+        for (int i = 0; i < 2; i++)
+        {
+            GameObject card = RuntimeUi.CreatePanel(_contractPanel.transform, "Offer" + i, CardColor);
+            RuntimeUi.Place(card.GetComponent<Image>().rectTransform, new Vector2(0.5f, 0.5f), new Vector2(xs[i], 60f), new Vector2(680f, 380f));
+
+            _offerName[i] = RuntimeUi.CreateText(card.transform, "Name", "", 40f, Color.white);
+            _offerName[i].fontStyle = FontStyles.Bold;
+            RuntimeUi.Place(_offerName[i].rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -50f), new Vector2(640f, 56f));
+
+            _offerText[i] = RuntimeUi.CreateText(card.transform, "Text", "", 28f, Grey);
+            RuntimeUi.Place(_offerText[i].rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -150f), new Vector2(600f, 110f));
+
+            _offerReward[i] = RuntimeUi.CreateText(card.transform, "Reward", "", 32f, WalletColor);
+            RuntimeUi.Place(_offerReward[i].rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -250f), new Vector2(600f, 44f));
+
+            int slot = i;
+            Button take = RuntimeUi.CreateButton(card.transform, "TAKE", new Vector2(0f, 50f), new Vector2(260f, 62f), 30f, ButtonIdle, ButtonHover, Color.white);
+            take.onClick.AddListener(() => TakeContract(slot));
+            _offerButton[i] = take;
+            _offerButtonLabel[i] = take.GetComponentInChildren<TextMeshProUGUI>();
+        }
+
+        _contractStatus = RuntimeUi.CreateText(_contractPanel.transform, "Status", "", 32f, Amber);
+        RuntimeUi.Place(_contractStatus.rectTransform, new Vector2(0.5f, 0.5f), new Vector2(0f, -190f), new Vector2(1500f, 50f));
+
+        _declineButton = RuntimeUi.CreateButton(_contractPanel.transform, "DECLINE", new Vector2(-230f, 40f), new Vector2(380f, 70f), 34f, ButtonIdle, ButtonHover, Color.white);
+        _declineButton.onClick.AddListener(DeclineContract);
+
+        Button back = RuntimeUi.CreateButton(_contractPanel.transform, "BACK", new Vector2(230f, 40f), new Vector2(380f, 70f), 34f, ButtonIdle, ButtonHover, Color.white);
+        back.onClick.AddListener(Close);
+    }
+
+    private void RefreshContracts()
+    {
+        if (_contractPanel == null) return;
+
+        int[] offers = { ContractState.OfferA, ContractState.OfferB };
+        int rewardFloor = GameFlow.CurrentFloor + 1;
+        for (int i = 0; i < 2; i++)
+        {
+            bool has = offers[i] >= 0;
+            _offerName[i].transform.parent.gameObject.SetActive(has);
+            if (!has) continue;
+
+            ContractDef def = ContractState.Def(offers[i]);
+            _offerName[i].text = def.Name;
+            _offerText[i].text = def.Text;
+            _offerReward[i].text = $"REWARD  {ContractState.Reward(offers[i], rewardFloor)}  {PlayerWallet.CurrencyName}";
+
+            bool taken = ContractState.ActiveId == offers[i];
+            _offerButtonLabel[i].text = taken ? "TAKEN" : "TAKE";
+            _offerButton[i].interactable = !ContractState.HasActive;
+        }
+
+        if (!ContractState.HasOffers) _contractStatus.text = "Nothing on the board.";
+        else if (ContractState.HasActive) _contractStatus.text = $"You took: {ContractState.Def(ContractState.ActiveId).Name}  Floor {ContractState.ActiveFloor}.";
+        else _contractStatus.text = "";
+
+        TextMeshProUGUI declineLabel = _declineButton.GetComponentInChildren<TextMeshProUGUI>();
+        if (declineLabel != null) declineLabel.text = ContractState.HasActive ? "DROP IT" : "DECLINE";
+    }
+
+    private void TakeContract(int slot)
+    {
+        int id = slot == 0 ? ContractState.OfferA : ContractState.OfferB;
+        if (id < 0 || ContractState.HasActive) return;
+
+        ContractState.Take(id, GameFlow.CurrentFloor + 1);
+        SaveSystem.WriteCheckpoint(GameFlow.CurrentFloor, true); // like a purchase: the taken contract survives a resume
+        if (_hud != null) _hud.ShowSubtitle("Bring it back in one piece.", 3f);
+        Close();
+    }
+
+    private void DeclineContract()
+    {
+        if (ContractState.HasActive)
+        {
+            ContractState.ClearActive();
+            SaveSystem.WriteCheckpoint(GameFlow.CurrentFloor, true);
+        }
+        if (_hud != null) _hud.ShowSubtitle("Suit yourself.", 2.5f);
+        Close();
     }
 
     private void Update()

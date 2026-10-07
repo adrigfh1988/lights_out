@@ -35,6 +35,9 @@ public class MainMenu : MonoBehaviour
     private Sprite _generatedSprite;
     private Transform _player;
     private bool _menuOpen = true;
+    // F86: the rules screen starts the run only as START GAME's fallback (no Intake built); from CONTROLS it is just a back button.
+    private bool _rulesStartsGame = true;
+    private TextMeshProUGUI _rulesButtonLabel;
 
     [Header("Music")]
     [Tooltip("Volume of the title music (Discovering Rooms)")]
@@ -153,8 +156,11 @@ public class MainMenu : MonoBehaviour
 
     // ---------------------------------------------------------------- flow
 
-    private void ShowRules()
+    private void ShowRules(bool startsGame)
     {
+        _rulesStartsGame = startsGame;
+        if (_rulesButtonLabel != null) _rulesButtonLabel.text = startsGame ? "START" : "BACK";
+
         // F76: TouchControls' own -83 Update has not necessarily run yet this frame (this is an
         // onClick callback), and the very first tap is exactly the case that needs Active to be
         // current right now, not next frame - Poll() is idempotent per frame either way.
@@ -169,9 +175,29 @@ public class MainMenu : MonoBehaviour
     {
         CloseMenus();
 
-        GameFlow.RunStartTime = Time.time;
-        GameFlow.IsRunActive = true;
+        GameFlow.BeginRun();
     }
+
+    /// <summary>
+    /// F86: START GAME. A new campaign opens in the Intake (the playable tutorial) instead of the rules screen; with no
+    /// IntakeRoom built it falls back to the old rules screen, which then starts the run.
+    /// </summary>
+    private void BeginNewCampaign()
+    {
+        IntakeRoom room = FindAnyObjectByType<IntakeRoom>();
+        if (room == null || !room.IsComplete)
+        {
+            ShowRules(true);
+            return;
+        }
+
+        // CloseMenus unfreezes the player and restores the clock; Begin (same frame) re-freezes for the wake-up beat.
+        CloseMenus();
+        room.Begin();
+    }
+
+    /// <summary>The CONTROLS button: the old rules screen as a reference sheet. Its button goes back to the title.</summary>
+    private void ShowControls() => ShowRules(false);
 
     /// <summary>The part of starting that both a run and a shop resume need: hide the screens, hand the player back, undo Awake's zeroed clock.</summary>
     private void CloseMenus()
@@ -233,20 +259,25 @@ public class MainMenu : MonoBehaviour
         if (SaveSystem.TryLoad(out SaveData save))
         {
             Button continueButton = RuntimeUi.CreateButton(_titleScreen.transform, "CONTINUE",
-                new Vector2(0f, 410f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
+                new Vector2(0f, 520f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
             continueButton.onClick.AddListener(ContinueSavedRun);
             _savedFloor = save.floor;
         }
 
         Button start = RuntimeUi.CreateButton(_titleScreen.transform, "START GAME",
-            new Vector2(0f, 300f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
-        start.onClick.AddListener(() => ConfirmThenStart(ShowRules));
+            new Vector2(0f, 410f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
+        start.onClick.AddListener(() => ConfirmThenStart(BeginNewCampaign));
 
         // F48: builds one floor out of the Maze Modular Puzzle Kit instead of the FloorThemes gallery.
-        // A test button - it skips the rules screen and drops straight into the run.
+        // A test button - it skips the Intake and drops straight into the run.
         Button startNewMaze = RuntimeUi.CreateButton(_titleScreen.transform, "START NEW MAZE",
-            new Vector2(0f, 190f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
+            new Vector2(0f, 300f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
         startNewMaze.onClick.AddListener(() => ConfirmThenStart(StartKitMaze));
+
+        // F86: the old rules screen, kept as a reference sheet now that START GAME opens the Intake.
+        Button controls = RuntimeUi.CreateButton(_titleScreen.transform, "CONTROLS",
+            new Vector2(0f, 190f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
+        controls.onClick.AddListener(ShowControls);
 
         Button exit = RuntimeUi.CreateButton(_titleScreen.transform, "EXIT",
             new Vector2(0f, 80f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
@@ -366,7 +397,16 @@ public class MainMenu : MonoBehaviour
 
         Button start = RuntimeUi.CreateButton(_rulesScreen.transform, "START",
             new Vector2(0f, 150f), new Vector2(420f, 90f), 44f, buttonIdle, buttonHover, Color.white);
-        start.onClick.AddListener(StartGame);
+        _rulesButtonLabel = start.GetComponentInChildren<TextMeshProUGUI>();
+        start.onClick.AddListener(() =>
+        {
+            if (_rulesStartsGame) StartGame();
+            else
+            {
+                _rulesScreen.SetActive(false);
+                _titleScreen.SetActive(true);
+            }
+        });
     }
 
     // ---------------------------------------------------------------- generated cover

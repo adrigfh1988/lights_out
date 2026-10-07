@@ -4670,6 +4670,20 @@ public class MazeGenerator : MonoBehaviour
         }
         if (shop != null) shop.Configure(player, hud, shopMenu);
 
+        // F86: the Intake - the playable tutorial START GAME opens before floor 1. Authored in the scene like the shop
+        // (LIGHTS OUT > Build > Intake Room); without it START GAME falls back to the old rules screen.
+        IntakeRoom intake = FindAnyObjectByType<IntakeRoom>(FindObjectsInactive.Include);
+        if (intake != null && !intake.IsComplete)
+        {
+            Debug.LogError("MazeGenerator: the IntakeRoom in the scene is incomplete. Run LIGHTS OUT > Build > Intake Room in the Editor.", intake);
+            intake = null;
+        }
+        else if (intake == null && mainMenu)
+        {
+            Debug.LogError("MazeGenerator: there is no IntakeRoom in the scene, so START GAME shows the rules screen instead of the tutorial. Run LIGHTS OUT > Build > Intake Room in the Editor, then save the scene.", this);
+        }
+        if (intake != null) intake.Configure(player, camera, hud, flashlight, stealth, interactor, throwController, loreReader);
+
         MazeEscape escape = null;
         if (escapeSequence)
         {
@@ -4696,14 +4710,19 @@ public class MazeGenerator : MonoBehaviour
         else
         {
             // No title screen means nothing calls MainMenu.StartGame, which is what starts the run
-            GameFlow.IsRunActive = true;
-            GameFlow.RunStartTime = Time.time;
+            GameFlow.BeginRun();
         }
 
         PauseMenu pause = FindAnyObjectByType<PauseMenu>();
         if (pause == null) pause = gameObject.AddComponent<PauseMenu>();
 
         pause.Configure(player, flashlight, menu, outcome, UsedSeed, shopMenu);
+
+        // F87: checks the contract taken in the shop for this floor (an instance component, like KeyRing: a reload recreates it).
+        ContractTracker contracts = player != null ? player.GetComponent<ContractTracker>() : null;
+        if (contracts == null && player != null) contracts = player.gameObject.AddComponent<ContractTracker>();
+        if (contracts != null) contracts.Configure(player, stealth, flashlight, aiFollower, hud, menu);
+        outcome.BindContracts(contracts);
 
         ConsumableController items = FindAnyObjectByType<ConsumableController>();
         if (items == null) items = gameObject.AddComponent<ConsumableController>();

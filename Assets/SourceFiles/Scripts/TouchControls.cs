@@ -195,7 +195,7 @@ public class TouchControls : MonoBehaviour
 
             // Switching back to keyboard/mouse mid-run: re-lock the cursor exactly as StartGame/Resume
             // would, but only if nothing else already owns the cursor.
-            if (GameFlow.IsRunActive && ShouldShowControls())
+            if ((GameFlow.IsRunActive || GameFlow.IsInIntake) && ShouldShowControls())
             {
                 PlayerLock.SetCursorFree(false);
             }
@@ -210,7 +210,7 @@ public class TouchControls : MonoBehaviour
         if (_lore != null && _lore.IsOpen) return false;
         if (GameOutcome.IsOver) return false;
         if (_outcome != null && _outcome.IsEnding) return false;
-        if (!GameFlow.IsRunActive && !GameFlow.IsInShop) return false;
+        if (!GameFlow.IsRunActive && !GameFlow.IsInShop && !GameFlow.IsInIntake) return false;
         return true;
     }
 

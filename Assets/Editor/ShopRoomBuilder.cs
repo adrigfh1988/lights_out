@@ -131,6 +131,8 @@ public static partial class ShopRoomBuilder
         Collider counterZone = BuildZone(points, "CounterZone", new Vector3(0f, 1.25f, 2.4f), new Vector3(4.5f, 2.5f, 2.2f));
         Collider doorZone = BuildZone(points, "DoorZone", new Vector3(0f, 1.25f, -4.9f), new Vector3(2.6f, 2.5f, 2.0f));
 
+        Collider contractZone = BuildContractBoard(root.transform); // F87
+
         ShopRoom room = root.AddComponent<ShopRoom>();
         SerializedObject so = new SerializedObject(room);
         so.FindProperty("arrivalPoint").objectReferenceValue = arrival;
@@ -140,6 +142,7 @@ public static partial class ShopRoomBuilder
         so.FindProperty("counterSign").objectReferenceValue = counterSign;
         so.FindProperty("doorSign").objectReferenceValue = doorSign;
         so.FindProperty("doorHinge").objectReferenceValue = doorHinge;
+        so.FindProperty("contractZone").objectReferenceValue = contractZone;
         so.ApplyModifiedPropertiesWithoutUndo();
 
         Selection.activeGameObject = root;

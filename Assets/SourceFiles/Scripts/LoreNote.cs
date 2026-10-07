@@ -8,6 +8,9 @@ using UnityEngine;
 /// </summary>
 public class LoreNote : MonoBehaviour, IInteractable
 {
+    /// <summary>F87: raised every time a note is opened, with its id (the Intake's note is -1). ContractTracker's Read it all contract listens.</summary>
+    public static event System.Action<int> Read;
+
     private int _noteId;
     private string _text;
     private LoreReadingUi _reader;
@@ -42,6 +45,7 @@ public class LoreNote : MonoBehaviour, IInteractable
         }
 
         _reader.Show(_text, who);
+        Read?.Invoke(_noteId);
         if (LoreArchive.MarkRead(_noteId))
         {
             PlayerWallet.AwardBonus(3);

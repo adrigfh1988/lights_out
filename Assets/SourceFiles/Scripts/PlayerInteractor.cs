@@ -129,7 +129,7 @@ public class PlayerInteractor : MonoBehaviour
     private bool IsActive()
     {
         if (Time.timeScale <= 0f) return false;
-        if (!GameFlow.IsRunActive || GameOutcome.IsOver || GameFlow.IsInShop) return false;
+        if (!(GameFlow.IsRunActive || GameFlow.IsInIntake) || GameOutcome.IsOver || GameFlow.IsInShop) return false;
         if (_stealth != null && _stealth.Hidden) return false;
         return true;
     }

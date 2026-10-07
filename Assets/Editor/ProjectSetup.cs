@@ -152,6 +152,23 @@ public static class ProjectSetup
         },
         new Piece
         {
+            Name = "Shop contract board (F87)",
+            FixMenu = "Build Missing Pieces (adds the board to the existing shop; a full Build > Shop Room builds it too)",
+            Problem = ShopRoomBuilder.ContractBoardProblem,
+            Build = () => ShopRoomBuilder.AddContractBoard()
+        },
+        new Piece
+        {
+            Name = "Intake room (F86 tutorial)",
+            FixMenu = "Build > Intake Room",
+            Problem = IntakeRoomBuilder.Problem,
+            Build = () =>
+            {
+                if (Object.FindAnyObjectByType<IntakeRoom>(FindObjectsInactive.Include) == null) IntakeRoomBuilder.BuildSilently();
+            }
+        },
+        new Piece
+        {
             Name = "Hunter body (Adam)",
             FixMenu = "Build > Hunter Body",
             Problem = () =>

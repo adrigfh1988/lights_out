@@ -90,7 +90,7 @@ public class TensionDirector : MonoBehaviour
     private void Update()
     {
         // Hidden in the shop (decision 5): the shop panel shows the wallet instead.
-        if (_counter != null) _counter.gameObject.SetActive(!GameFlow.IsInShop);
+        if (_counter != null) _counter.gameObject.SetActive(!GameFlow.IsInSafeRoom);
     }
 
     private float Progress => _total > 0 ? _collected / (float)_total : 0f;
