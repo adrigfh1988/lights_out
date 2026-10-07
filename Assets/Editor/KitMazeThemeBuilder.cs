@@ -181,6 +181,7 @@ public static class KitMazeThemeBuilder
         BloodDecalUpgrade.Apply();
         SetPieceDecalFix.Apply();
         CorpseUpgrade.Apply();
+        PackDressing.Apply();
 
         Selection.activeGameObject = root;
         SceneView.lastActiveSceneView?.FrameSelected();

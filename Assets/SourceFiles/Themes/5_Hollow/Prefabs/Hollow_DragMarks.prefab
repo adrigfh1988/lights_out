@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 5505967752124396130}
   - component: {fileID: 5375649225316092979}
+  - component: {fileID: 908968544617682025}
   m_Layer: 0
   m_Name: Hollow_DragMarks
   m_TagString: Untagged
@@ -50,7 +51,30 @@ MonoBehaviour:
   weight: 0.7
   enabledInMaze: 1
   decalSizeRange: {x: 1.5, y: 2.5}
-  randomRoll: 0
+  randomRoll: 1
+  allowLowHang: 0
+--- !u!114 &908968544617682025
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 927038674677622941}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 39d3c03cb82bdc243b28c38be8f28c01, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DecalVariants
+  materials:
+  - {fileID: 2100000, guid: 7e2d9c585bf9b2b4fbfaf34f65de1d62, type: 2}
+  - {fileID: 2100000, guid: dd3103708e10d4847a87853188f07311, type: 2}
+  - {fileID: 2100000, guid: 072f91e3968600f4596db8e7c1e71a86, type: 2}
+  - {fileID: 2100000, guid: c3c2297eb48fc2f4ea6bcc338a4cbfcb, type: 2}
+  aspects:
+  - 2.56
+  - 2.9257143
+  - 2.9257143
+  - 2.9257143
 --- !u!1 &3854650919206366777
 GameObject:
   m_ObjectHideFlags: 0
@@ -79,7 +103,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0.7071068, y: 0, z: 0, w: 0.7071068}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalScale: {x: 1, y: 0.390625, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 5505967752124396130}
@@ -117,7 +141,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: efc3c2c3eb997cb458f06c00d411e0e3, type: 2}
+  - {fileID: 2100000, guid: 7e2d9c585bf9b2b4fbfaf34f65de1d62, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0

@@ -1304,51 +1304,7 @@ public static class InteractableKitBuilder
     /// LoadOrCreateMat). Materials already on a URP shader are returned as they are. Only the textures
     /// are reused; the packs' own Standard materials are left untouched.
     /// </summary>
-    private static Material UrpCopyOf(Material source)
-    {
-        if (source == null) return null;
-        if (source.shader != null && source.shader.name.StartsWith("Universal Render Pipeline/")) return source;
-
-        string safeName = source.name.Replace(' ', '_');
-        string path = $"{MaterialFolder}/Pack_{safeName}.mat";
-        Material existing = AssetDatabase.LoadAssetAtPath<Material>(path);
-        if (existing != null) return existing;
-
-        Shader shader = Shader.Find("Universal Render Pipeline/Lit");
-        if (shader == null) return source;
-
-        Material material = new Material(shader) { name = $"Pack_{safeName}" };
-
-        if (source.HasProperty("_MainTex") && source.GetTexture("_MainTex") != null)
-        {
-            material.SetTexture("_BaseMap", source.GetTexture("_MainTex"));
-            material.SetTextureScale("_BaseMap", source.GetTextureScale("_MainTex"));
-            material.SetTextureOffset("_BaseMap", source.GetTextureOffset("_MainTex"));
-        }
-        material.SetColor("_BaseColor", source.HasProperty("_Color") ? source.GetColor("_Color") : Color.white);
-
-        if (source.HasProperty("_BumpMap") && source.GetTexture("_BumpMap") != null)
-        {
-            material.SetTexture("_BumpMap", source.GetTexture("_BumpMap"));
-            material.EnableKeyword("_NORMALMAP");
-        }
-
-        if (source.HasProperty("_MetallicGlossMap") && source.GetTexture("_MetallicGlossMap") != null)
-        {
-            // Both shaders read metallic from R and smoothness from A of this map; _Smoothness scales A.
-            material.SetTexture("_MetallicGlossMap", source.GetTexture("_MetallicGlossMap"));
-            material.EnableKeyword("_METALLICSPECGLOSSMAP");
-            material.SetFloat("_Smoothness", source.HasProperty("_GlossMapScale") ? source.GetFloat("_GlossMapScale") : 1f);
-        }
-        else
-        {
-            material.SetFloat("_Metallic", source.HasProperty("_Metallic") ? source.GetFloat("_Metallic") : 0f);
-            material.SetFloat("_Smoothness", source.HasProperty("_Glossiness") ? source.GetFloat("_Glossiness") : 0.5f);
-        }
-
-        AssetDatabase.CreateAsset(material, path);
-        return material;
-    }
+    private static Material UrpCopyOf(Material source) => PackMaterials.UrpCopyOf(source); // moved to PackMaterials (F85)
 
     /// <summary>Loaded if it already exists (hand edits survive a rebuild), otherwise created as a URP Lit material.</summary>
     private static Material LoadOrCreateMat(string name, Color color, Color? emission, float smoothness)

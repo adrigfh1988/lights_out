@@ -670,7 +670,7 @@ public static partial class FloorThemeBuilder
         return new CommonDressing
         {
             Props = props.ToArray(),
-            SetPieces = new[] { fallenRunner },
+            SetPieces = KitSetPieces(fallenRunner), // F85: + the DeadBody LITE morgue bed and bath
             Dust = dust
         };
     }

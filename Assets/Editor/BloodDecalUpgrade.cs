@@ -55,7 +55,43 @@ public static class BloodDecalUpgrade
             DecalVariants variants = prefab.GetComponent<DecalVariants>();
             if (variants == null || variants.Count == 0) return true;
         }
-        return false;
+
+        GameObject runner = AssetDatabase.LoadAssetAtPath<GameObject>(CorpseUpgrade.FallenRunnerPath);
+        Transform drag = runner != null ? runner.transform.Find("DragMarksDecal") : null;
+        MeshRenderer dragQuad = drag != null ? drag.GetComponent<MeshRenderer>() : null;
+        return dragQuad != null && dragQuad.sharedMaterial != null && !UsesPackTexture(dragQuad.sharedMaterial);
+    }
+
+    /// <summary>
+    /// The FallenRunner's baked DragMarksDecal quad (the drawn row of red ovals) gets the blood-pack smear blood5,
+    /// shaped to its aspect with the longest side kept. Crypt_Collapse's DustDecal shares the drawn DragMarks material
+    /// but is dust, not blood - it is left alone, which is why the shared material itself is not switched.
+    /// </summary>
+    private static bool UpgradeFallenRunnerDrag(Dictionary<string, Material> variantMats, Dictionary<string, float> aspects)
+    {
+        if (!variantMats.TryGetValue("blood5", out Material smear)) return false;
+
+        GameObject loaded = AssetDatabase.LoadAssetAtPath<GameObject>(CorpseUpgrade.FallenRunnerPath);
+        Transform probe = loaded != null ? loaded.transform.Find("DragMarksDecal") : null;
+        MeshRenderer probeQuad = probe != null ? probe.GetComponent<MeshRenderer>() : null;
+        if (probeQuad == null || probeQuad.sharedMaterial == smear) return false;
+
+        GameObject root = PrefabUtility.LoadPrefabContents(CorpseUpgrade.FallenRunnerPath);
+        try
+        {
+            Transform quad = root.transform.Find("DragMarksDecal");
+            quad.GetComponent<MeshRenderer>().sharedMaterial = smear;
+            float aspect = aspects.TryGetValue("blood5", out float a) ? a : 1f;
+            Vector3 s = quad.localScale;
+            float side = Mathf.Max(s.x, s.y);
+            quad.localScale = aspect >= 1f ? new Vector3(side, side / aspect, s.z) : new Vector3(side * aspect, side, s.z);
+            PrefabUtility.SaveAsPrefabAsset(root, CorpseUpgrade.FallenRunnerPath);
+            return true;
+        }
+        finally
+        {
+            PrefabUtility.UnloadPrefabContents(root);
+        }
     }
 
     /// <summary>Does all three steps. Returns how many prefabs it (re)wrote; 0 with no pack.</summary>
@@ -83,11 +119,13 @@ public static class BloodDecalUpgrade
         int written = 0;
         foreach (string path in BloodPrefabPaths())
         {
-            string[] set = path.EndsWith("_BloodSmear.prefab") ? SmearVariants
+            string[] set = path.EndsWith("_BloodSmear.prefab") || path.EndsWith("_DragMarks.prefab") ? SmearVariants
                 : path.EndsWith("_BloodPool.prefab") || path.EndsWith("_Footprints.prefab") ? PoolVariants
                 : SplatVariants;
-            if (WriteVariants(path, set, variantMats, aspects, freeRoll: path.EndsWith("_Footprints.prefab"))) written++;
+            bool freeRoll = path.EndsWith("_Footprints.prefab") || path.EndsWith("_DragMarks.prefab");
+            if (WriteVariants(path, set, variantMats, aspects, freeRoll)) written++;
         }
+        if (UpgradeFallenRunnerDrag(variantMats, aspects)) written++;
 
         AssetDatabase.SaveAssets();
         Debug.Log($"BloodDecalUpgrade: blood decals now use the Blood decal pack ({variantMats.Count} variant materials, {written} prefabs).");
@@ -238,7 +276,8 @@ public static class BloodDecalUpgrade
         {
             string path = AssetDatabase.GUIDToAssetPath(guid);
             if (path.EndsWith("_BloodSplat.prefab") || path.EndsWith("_BloodSmear.prefab") || path.EndsWith("_BloodPool.prefab")
-                || path.EndsWith("_Footprints.prefab")) yield return path; // footprints become blood (7 Oct 2026)
+                || path.EndsWith("_Footprints.prefab")  // footprints become blood (7 Oct 2026)
+                || path.EndsWith("_DragMarks.prefab")) yield return path; // drag marks become blood smears (F85)
         }
     }
 

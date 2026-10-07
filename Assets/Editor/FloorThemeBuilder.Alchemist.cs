@@ -22,7 +22,12 @@ public static partial class FloorThemeBuilder
     internal enum AlchemistSet
     {
         None = 0, Books = 1, Bottles = 2, Dishes = 4, Lab = 8, Organic = 16, Specimens = 32,
-        Storage = 64, Furniture = 128, Paintings = 256, Weapons = 512, Rugs = 1024, All = ~0
+        Storage = 64, Furniture = 128, Paintings = 256, Weapons = 512, Rugs = 1024,
+        // F85: the shop's big furniture as standing / hung wall props (plannings/pack-dressing-plan.md section B).
+        Cabinets = 2048, Shelves = 4096, Tables = 8192, Workshop = 16384, Sink = 32768, Stove = 65536, Alembic = 131072, Nursery = 262144,
+        Legacy = 2047,
+        FurnitureAll = Cabinets | Shelves | Tables | Workshop | Sink | Stove | Alembic | Nursery,
+        All = ~0
     }
 
     internal const string AlchemistFolder = CommonRoot + "/Prefabs/Alchemist";
@@ -30,11 +35,16 @@ public static partial class FloorThemeBuilder
     /// <summary>Per gallery row (Ward, Boiler Deck, Crypt, Lab, Hollow) - the one place a theme's subset is defined.</summary>
     internal static readonly AlchemistSet[] ThemeSets =
     {
-        AlchemistSet.Books | AlchemistSet.Bottles | AlchemistSet.Dishes | AlchemistSet.Storage | AlchemistSet.Furniture | AlchemistSet.Paintings | AlchemistSet.Rugs,
-        AlchemistSet.Bottles | AlchemistSet.Dishes | AlchemistSet.Storage | AlchemistSet.Furniture,
-        AlchemistSet.All,
-        AlchemistSet.Books | AlchemistSet.Bottles | AlchemistSet.Lab | AlchemistSet.Organic | AlchemistSet.Specimens | AlchemistSet.Furniture,
-        AlchemistSet.All
+        AlchemistSet.Books | AlchemistSet.Bottles | AlchemistSet.Dishes | AlchemistSet.Storage | AlchemistSet.Furniture | AlchemistSet.Paintings | AlchemistSet.Rugs
+            | AlchemistSet.Cabinets | AlchemistSet.Sink,
+        AlchemistSet.Bottles | AlchemistSet.Dishes | AlchemistSet.Storage | AlchemistSet.Furniture
+            | AlchemistSet.Shelves | AlchemistSet.Workshop | AlchemistSet.Stove,
+        // Crypt also carries the Hollow-only pieces (Stove, Nursery): floor 5 plays the Crypt row, not the Hollow (7 Oct 2026).
+        AlchemistSet.Legacy | AlchemistSet.Cabinets | AlchemistSet.Shelves | AlchemistSet.Tables | AlchemistSet.Workshop | AlchemistSet.Alembic
+            | AlchemistSet.Stove | AlchemistSet.Nursery,
+        AlchemistSet.Books | AlchemistSet.Bottles | AlchemistSet.Lab | AlchemistSet.Organic | AlchemistSet.Specimens | AlchemistSet.Furniture
+            | AlchemistSet.Sink | AlchemistSet.Workshop | AlchemistSet.Alembic | AlchemistSet.Nursery,
+        AlchemistSet.Legacy | AlchemistSet.Cabinets | AlchemistSet.Shelves | AlchemistSet.Tables | AlchemistSet.Stove | AlchemistSet.Nursery
     };
 
     /// <summary>The kit maze's subset. Kit mode forces wall/ceiling prop chances to 0, so only the Floor and FloorDecal kinds of these are ever listed (see KitPropFilter).</summary>
@@ -96,7 +106,7 @@ public static partial class FloorThemeBuilder
             return new AlchDef { Name = name, Set = AlchemistSet.Rugs, Mount = PropPiece.MountKind.FloorDecal, Depth = 0f, Weight = 0.35f, Compose = () => ComposeRug(name, carpet) };
         }
 
-        return new List<AlchDef>
+        List<AlchDef> defs = new List<AlchDef>
         {
             // ---- floor clusters ----
             Cluster("Alch_BookPileA", AlchemistSet.Books, 0.40f, 1.0f, 0.35f,
@@ -186,6 +196,8 @@ public static partial class FloorThemeBuilder
             Rug("Alch_Rug2", "Furniture/Carpet02"),
             Rug("Alch_Rug3", "Furniture/Carpet03"),
         };
+        defs.AddRange(FurnitureDefs()); // F85
+        return defs;
     }
 
     // ---------------------------------------------------------------- composition

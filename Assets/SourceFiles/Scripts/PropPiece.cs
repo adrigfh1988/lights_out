@@ -48,7 +48,11 @@ public class PropPiece : MonoBehaviour
     [Tooltip("Decals only: spin the quad a random amount about its facing axis. Off for a directional decal (footprints, drag marks) that must stay upright/aligned.")]
     [SerializeField] private bool randomRoll = true;
 
+    [Tooltip("Ceiling only: may hang into head height (a hanging body, feet about 0.4 m off the floor). Skips MazeGenerator's low-ceiling depth guard - the prefab's own Depth must already fit the ceiling of the floors it is listed on.")]
+    [SerializeField] private bool allowLowHang = false;
+
     public MountKind Mount => mount;
+    public bool AllowLowHang => allowLowHang;
     public float Depth => depth;
     public float Weight => weight;
     public bool EnabledInMaze => enabledInMaze;

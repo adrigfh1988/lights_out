@@ -52,6 +52,7 @@ MonoBehaviour:
   enabledInMaze: 1
   decalSizeRange: {x: 1.2, y: 1.8}
   randomRoll: 1
+  allowLowHang: 0
 --- !u!114 &4992136551113393688
 MonoBehaviour:
   m_ObjectHideFlags: 0

@@ -86,6 +86,12 @@ public class MazeGenerator : MonoBehaviour
     [Tooltip("Extra pick weight for decals with look-alike variants (the Blood decal pack splats/smears/pools) over grime, drips and the rest. 1 = the prefab's own weight.")]
     [SerializeField, Min(0f)] private float bloodWeight = 3f;
 
+    [Header("Props (F85)")]
+    [Tooltip("Multiplies the theme's wall / ceiling / floor prop chances (capped at 0.85 per roll, never below the theme's own number). 1 = the theme's own numbers. Only the +4 / +6 dressing streams shift.")]
+    [SerializeField, Min(0f)] private float propDensity = 1.4f;
+    [Tooltip("Extra set pieces on a themed floor, on top of the theme's own count. Set pieces only land in eligible cells, so this is a ceiling, not a guarantee.")]
+    [SerializeField, Min(0)] private int setPieceBonus = 1;
+
     [Header("Actors")]
     [SerializeField] private NavMeshSurface navMeshSurface;
     [SerializeField] private AIFollower aiFollower;
@@ -510,13 +516,13 @@ public class MazeGenerator : MonoBehaviour
                 Props = _theme.Props,
                 SetPieces = _theme.SetPieces,
                 Dust = _theme.Dust,
-                WallPropChance = _theme.WallPropChance,
-                CeilingPropChance = _theme.CeilingPropChance,
-                FloorPropChance = _theme.FloorPropChance,
+                WallPropChance = DenserProps(_theme.WallPropChance),
+                CeilingPropChance = DenserProps(_theme.CeilingPropChance),
+                FloorPropChance = DenserProps(_theme.FloorPropChance),
                 WallDecalChance = _theme.WallDecalChance,
                 FloorDecalChance = _theme.FloorDecalChance,
                 MaxDecalsPerCell = _theme.MaxDecalsPerCell,
-                SetPieceCount = _theme.SetPieceCount
+                SetPieceCount = _theme.SetPieceCount > 0 ? _theme.SetPieceCount + setPieceBonus : 0
             };
         }
         else if (_kitMode && kitTheme != null)
@@ -528,7 +534,7 @@ public class MazeGenerator : MonoBehaviour
                 Dust = kitTheme.Dust,
                 WallPropChance = 0f,
                 CeilingPropChance = 0f,
-                FloorPropChance = kitTheme.FloorPropChance,
+                FloorPropChance = DenserProps(kitTheme.FloorPropChance),
                 WallDecalChance = kitTheme.WallDecalChance,
                 FloorDecalChance = kitTheme.FloorDecalChance,
                 MaxDecalsPerCell = kitTheme.MaxDecalsPerCell,
@@ -539,6 +545,18 @@ public class MazeGenerator : MonoBehaviour
         {
             _dressing = default;
         }
+    }
+
+    /// <summary>F85: a theme's prop chance scaled by propDensity, capped at 0.85 but never lowered below its own value.</summary>
+    private float DenserProps(float chance)
+    {
+        return Mathf.Max(chance, Mathf.Min(0.85f, chance * propDensity));
+    }
+
+    /// <summary>F85: look-alike models under a prop (hanging bodies, shrouds, sockets, vents) picked by a hash of the cell - no rng draw, same trick as the set pieces.</summary>
+    private static void ApplyModelVariants(Component clone, int x, int z, int salt)
+    {
+        if (clone.TryGetComponent(out ModelVariants models)) models.Apply((x * 73856093) ^ (z * 19349663) ^ salt);
     }
 
     /// <summary>
@@ -1156,6 +1174,7 @@ public class MazeGenerator : MonoBehaviour
                 PropPiece clone = Instantiate(prop, pos, Quaternion.LookRotation(-dir), _propsGroup);
                 clone.gameObject.SetActive(true);
                 clone.name = $"Prop_{prop.name}_{x}_{z}";
+                ApplyModelVariants(clone, x, z, 0x3A11);
 
                 if (!_propWalls.TryGetValue(cell, out List<Vector3> taken))
                 {
@@ -1193,7 +1212,7 @@ public class MazeGenerator : MonoBehaviour
                 // the player. Checked after every RNG draw this cell makes (chance, pick, rotation) so
                 // the seed stream is unchanged - a taller floor still gets exactly the props, in exactly
                 // the same rotations, it would have before this guard existed.
-                if (prop.Depth > wallHeight - 2.2f) continue;
+                if (!prop.AllowLowHang && prop.Depth > wallHeight - 2.2f) continue;
 
                 // F70: same rule as above - checked after every draw, so it never perturbs the stream.
                 if (_setPieceCells.Contains(cell)) continue;
@@ -1201,6 +1220,8 @@ public class MazeGenerator : MonoBehaviour
                 PropPiece clone = Instantiate(prop, pos, rotation, _propsGroup);
                 clone.gameObject.SetActive(true);
                 clone.name = $"Prop_{prop.name}_{x}_{z}";
+                ApplyModelVariants(clone, x, z, 0x4B22);
+                foreach (HangingBodyFit fit in clone.GetComponentsInChildren<HangingBodyFit>(true)) fit.Fit(wallHeight); // F85: rope cut to this floor's ceiling
             }
         }
     }

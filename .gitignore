@@ -77,3 +77,5 @@ desktop.ini
 # To use another file from a pack: git add -f "<file>" "<file>.meta" (and any new folder's .meta).
 /Assets/Blood decal pack/
 /Assets/DeadBody LITE/
+/Assets/Socket Pack/
+/Assets/Gabies_Assets/

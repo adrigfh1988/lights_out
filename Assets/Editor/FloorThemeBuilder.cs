@@ -22,7 +22,7 @@ public static partial class FloorThemeBuilder
     private const string GalleryName = "FloorThemes";
     private static readonly Vector3 GalleryOrigin = new Vector3(-70f, 5f, -6f);
     private const float RowSpacing = 12f;
-    private const float PieceSpacing = 6f;
+    internal const float PieceSpacing = 6f;
 
     // Canonical authored sizes. WallPiece.ScaleFor divides by these; FloorTile/CeilingTile are scaled by
     // MazeGenerator using cellSize / TileSize. The gallery and SampleCell show every piece at scale 1.
@@ -120,6 +120,7 @@ public static partial class FloorThemeBuilder
         BloodDecalUpgrade.Apply();
         SetPieceDecalFix.Apply();
         CorpseUpgrade.Apply();
+        PackDressing.Apply(); // F85: any pack piece a hand-edited row or an older scene lacks
 
         AssetDatabase.SaveAssets();
         Selection.activeGameObject = galleryRoot;
@@ -601,6 +602,7 @@ public static partial class FloorThemeBuilder
 
         props.AddRange(BuildCommonFloorProps());
         props.AddRange(BuildAlchemistProps(ThemeSets[0])); // F79
+        props.AddRange(BuildPackProps(PackWard)); // F85
 
         CommonDecalMaterials wardCommonDecals = GetCommonDecalMaterials();
         Material wardGrimeMat = LoadOrCreateDecalMat(folder, "Ward_Grime", EnsureDecalTexture("Decal_Grime"), new Color(0.1f, 0.14f, 0.1f), 0.1f);
@@ -650,6 +652,7 @@ public static partial class FloorThemeBuilder
             BuildWardIsolation(),
             BuildFallenRunnerSetPiece(wardCommonDecals)
         };
+        setPieces.AddRange(BuildPackSetPieces(PackWard)); // F85
 
         DustMotes dust = BuildDustPrefab(folder, "Ward_Dust", new Color(0.8f, 0.8f, 0.75f), 25f, 0.015f, 0.03f);
 
@@ -845,6 +848,7 @@ public static partial class FloorThemeBuilder
 
         props.AddRange(BuildCommonFloorProps());
         props.AddRange(BuildAlchemistProps(ThemeSets[2])); // F79
+        props.AddRange(BuildPackProps(PackCrypt)); // F85
 
         CommonDecalMaterials cryptCommonDecals = GetCommonDecalMaterials();
         Material cryptGrimeMat = LoadOrCreateDecalMat(folder, "Crypt_Grime", EnsureDecalTexture("Decal_Grime"), new Color(0.08f, 0.1f, 0.06f), 0.05f);
@@ -909,6 +913,7 @@ public static partial class FloorThemeBuilder
             BuildCryptCollapse(),
             BuildFallenRunnerSetPiece(cryptCommonDecals)
         };
+        setPieces.AddRange(BuildPackSetPieces(PackCrypt)); // F85
 
         DustMotes dust = BuildDustPrefab(folder, "Crypt_Dust", new Color(0.7f, 0.68f, 0.6f), 50f, 0.015f, 0.03f);
 
@@ -1101,6 +1106,7 @@ public static partial class FloorThemeBuilder
 
         props.AddRange(BuildCommonFloorProps());
         props.AddRange(BuildAlchemistProps(ThemeSets[1])); // F79
+        props.AddRange(BuildPackProps(PackBoiler)); // F85
 
         CommonDecalMaterials boilerCommonDecals = GetCommonDecalMaterials();
         Material boilerGrimeMat = LoadOrCreateDecalMat(folder, "Boiler_Grime", EnsureDecalTexture("Decal_Grime"), new Color(0.05f, 0.04f, 0.03f), 0.2f);
@@ -1154,6 +1160,7 @@ public static partial class FloorThemeBuilder
             BuildBoilerSparks(),
             BuildFallenRunnerSetPiece(boilerCommonDecals)
         };
+        setPieces.AddRange(BuildPackSetPieces(PackBoiler)); // F85
 
         DustMotes dust = BuildDustPrefab(folder, "Boiler_Dust", new Color(0.6f, 0.5f, 0.4f), 35f, 0.015f, 0.03f,
             extraChildren: dustRoot => AddLocalParticles(dustRoot.transform, folder, "Boiler_Embers", new Color(1.0f, 0.55f, 0.2f), 1.5f, 4f, 7f, 0.01f, 0.01f, 0.2f, new Vector3(7f, 3f, 7f)));
@@ -1354,6 +1361,7 @@ public static partial class FloorThemeBuilder
 
         props.AddRange(BuildCommonFloorProps());
         props.AddRange(BuildAlchemistProps(ThemeSets[3])); // F79
+        props.AddRange(BuildPackProps(PackLab)); // F85
 
         CommonDecalMaterials labCommonDecals = GetCommonDecalMaterials();
         Material labGrimeMat = LoadOrCreateDecalMat(folder, "Lab_Grime", EnsureDecalTexture("Decal_Grime"), new Color(0.1f, 0.15f, 0.13f), 0.2f);
@@ -1421,6 +1429,7 @@ public static partial class FloorThemeBuilder
             BuildLabDesk(),
             BuildFallenRunnerSetPiece(labCommonDecals)
         };
+        setPieces.AddRange(BuildPackSetPieces(PackLab)); // F85
 
         DustMotes dust = BuildDustPrefab(folder, "Lab_Dust", new Color(0.85f, 0.9f, 0.9f), 12f, 0.015f, 0.03f);
 
@@ -1602,6 +1611,7 @@ public static partial class FloorThemeBuilder
 
         props.AddRange(BuildCommonFloorProps());
         props.AddRange(BuildAlchemistProps(ThemeSets[4])); // F79
+        props.AddRange(BuildPackProps(PackHollow)); // F85
 
         // Hollow doubles Handprint/ClawMarks weight (decision, plan section 3.2).
         CommonDecalMaterials hollowCommonDecals = GetCommonDecalMaterials();
@@ -1678,6 +1688,7 @@ public static partial class FloorThemeBuilder
             BuildHollowNest(),
             BuildFallenRunnerSetPiece(hollowCommonDecals)
         };
+        setPieces.AddRange(BuildPackSetPieces(PackHollow)); // F85
 
         // Hollow dust is slower (ash) - lower startSpeed than the shared default.
         DustMotes dust = BuildDustPrefab(folder, "Hollow_Dust", new Color(0.55f, 0.55f, 0.55f), 40f, 0.015f, 0.03f, speedMin: 0.01f, speedMax: 0.03f);
@@ -1819,7 +1830,7 @@ public static partial class FloorThemeBuilder
         return prefab == null ? null : InstantiateShowcaseGo(row, prefab, ref x);
     }
 
-    private static GameObject InstantiateShowcaseGo(Transform row, GameObject prefab, ref float x)
+    internal static GameObject InstantiateShowcaseGo(Transform row, GameObject prefab, ref float x)
     {
         GameObject instance = (GameObject)PrefabUtility.InstantiatePrefab(prefab, row);
         instance.transform.localPosition = new Vector3(x, 0f, 0f);
