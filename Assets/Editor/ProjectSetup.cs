@@ -78,6 +78,13 @@ public static class ProjectSetup
         },
         new Piece
         {
+            Name = "Theme surface textures (F88)",
+            FixMenu = "Build Missing Pieces (or any Build > Floor Themes run)",
+            Problem = () => ThemeSurfaceUpgrade.Problems(),
+            Build = () => ThemeSurfaceUpgrade.Apply()
+        },
+        new Piece
+        {
             Name = "Pack dressing (beds, baths, bodies, furniture, vents)",
             FixMenu = "Build Missing Pieces (or any Build > Floor Themes / Kit Maze Theme run)",
             Problem = () => PackDressing.NeedsUpgrade() ? "a gallery row or the kit maze lacks pieces from the DeadBody LITE / Socket Pack / Alchemist furniture set" : null,

@@ -121,6 +121,7 @@ public static partial class FloorThemeBuilder
         SetPieceDecalFix.Apply();
         CorpseUpgrade.Apply();
         PackDressing.Apply(); // F85: any pack piece a hand-edited row or an older scene lacks
+        ThemeSurfaceUpgrade.Apply(); // F88: real PBR surface textures on the structural theme materials
 
         AssetDatabase.SaveAssets();
         Selection.activeGameObject = galleryRoot;
