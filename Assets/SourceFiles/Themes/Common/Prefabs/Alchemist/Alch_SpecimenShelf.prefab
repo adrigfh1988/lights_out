@@ -986,7 +986,7 @@ MonoBehaviour:
   m_EditorClassIdentifier: Assembly-CSharp::PropPiece
   mount: 0
   depth: 0.36
-  weight: 1
+  weight: 0.4
   enabledInMaze: 1
   decalSizeRange: {x: 0.6, y: 1.2}
   randomRoll: 1

@@ -46,7 +46,7 @@ public static partial class FloorThemeBuilder
             // Lab SpecimenShelf (a frame of cylinder jars) -> the pack's wall shelf with specimen jars.
             new AlchDef
             {
-                Name = "Alch_SpecimenShelf", Set = AlchemistSet.SpecimenShelf, Mount = Wall, Depth = 0.36f, Weight = 1f,
+                Name = "Alch_SpecimenShelf", Set = AlchemistSet.SpecimenShelf, Mount = Wall, Depth = 0.36f, Weight = 0.4f, // 1 made it ~1 in 4 Lab wall props (8 Oct 2026)
                 Compose = () =>
                 {
                     GameObject root = new GameObject("Alch_SpecimenShelf");
