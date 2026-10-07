@@ -84,7 +84,7 @@ public class AIPresence : MonoBehaviour
 
     private void Start()
     {
-        // The scene's sci-fi loop, pitched down, read as radio static. The Weeping Angel gets a
+        // The scene's sci-fi loop, pitched down, read as radio static. The hunter gets a
         // synthesised stone choir instead; the scene clip is only a fallback if that is switched off.
         if (useChoirHum || humClip != null)
         {

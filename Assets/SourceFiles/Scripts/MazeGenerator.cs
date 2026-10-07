@@ -4544,6 +4544,15 @@ public class MazeGenerator : MonoBehaviour
         // F73: lets the hunter notice the torch beam itself, not just what it lights up.
         aiFollower?.BindTorch(flashlight, camera != null ? camera.transform : null);
 
+        // F82: the hunter talks in speech bubbles too (same engine as Stan's). LIGHTS OUT > Build Phrase
+        // Books puts a HunterVoice with its phrase book on the scene hunter; added here if missing.
+        if (aiFollower != null)
+        {
+            HunterVoice hunterVoice = aiFollower.GetComponent<HunterVoice>();
+            if (hunterVoice == null) hunterVoice = aiFollower.gameObject.AddComponent<HunterVoice>();
+            hunterVoice.Configure(aiFollower, stealth, outcome);
+        }
+
         // F75: the second creature (floors 4-5 only, FloorProfile.HasStalker). Built earlier in Awake
         // (BuildStalker, +16), before the player/camera/flashlight/hunter/HUD/outcome existed -
         // late-bound here, same pattern as the lantern/lore notes above.

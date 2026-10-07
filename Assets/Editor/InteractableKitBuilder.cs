@@ -1038,6 +1038,7 @@ public static class InteractableKitBuilder
         BuildStalkerEyes(root);
 
         Stalker stalker = root.AddComponent<Stalker>();
+        StanPhraseBookBuilder.AssignTo(stalker); // F82: keep the phrase-book link across a full rebuild (no-op if the asset doesn't exist yet)
         // An expensive skinned mesh + animator should not sit active (and animating/rendering) in the
         // gallery - MazeGenerator.BuildStalker's Instantiate + SetActive(true) is what brings a clone
         // to life at runtime, same pattern as CreateDoor.

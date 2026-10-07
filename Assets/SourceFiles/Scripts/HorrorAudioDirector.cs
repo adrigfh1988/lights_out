@@ -80,7 +80,7 @@ public class HorrorAudioDirector : MonoBehaviour
         _player = player;
         _follower = follower;
         if (follower != null) _hunter = follower.transform;
-        // The Weeping Angel's own synthesised sting always wins over whatever clip MazeGenerator hands over
+        // The hunter's own synthesised sting always wins over whatever clip MazeGenerator hands over
         stingClip = AngelAudio.BuildSting();
         stingPitch = 1f;
         stingDuration = 2.5f;

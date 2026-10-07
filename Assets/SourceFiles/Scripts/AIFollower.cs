@@ -274,6 +274,9 @@ public class AIFollower : MonoBehaviour
     /// <summary>F50: true while actively sweeping the area around a noise or a lost sighting.</summary>
     public bool IsSearching => _state == State.Search;
 
+    /// <summary>F82: true while a bashed-open MazeDoor is holding it (Stall). Read by HunterVoice for its door line.</summary>
+    public bool IsStalled => Time.time < _stallUntil;
+
     /// <summary>F50: the pose UpdateAnimator computed this frame - see the Pose enum doc comment.</summary>
     public Pose CurrentPose { get; private set; }
 

@@ -122,6 +122,10 @@ public class Stalker : MonoBehaviour
     [SerializeField] private float litTwitchIntervalMax = 6f;
     [SerializeField] private float litTwitchAngle = 12f;
 
+    [Header("Voice (F82)")]
+    [Tooltip("Stan's lines (Assets/SourceFiles/Data/StanPhrases.asset). Assigned by LIGHTS OUT > Build Phrase Books; empty = built-in defaults.")]
+    [SerializeField] private StalkerPhraseBook phraseBook;
+
     private MazeGenerator _maze;
     private Transform _player;
     private Flashlight _torch;
@@ -130,6 +134,14 @@ public class Stalker : MonoBehaviour
     private AIFollower _hunter;
     private PlayerHud _hud;
     private GameOutcome _outcome;
+
+    // F82: the speech-bubble voice (added in Configure) and the eyes it flares while a letter blips.
+    private StalkerVoice _voice;
+    private Renderer[] _eyeRenderers;
+    private Color[] _eyeBaseEmission;
+    private MaterialPropertyBlock _eyeBlock;
+    private float _appliedFlare;
+    private static readonly int EmissionColorId = Shader.PropertyToID("_EmissionColor");
 
     private NavMeshAgent _agent;
     private Animator _animator;
@@ -205,6 +217,12 @@ public class Stalker : MonoBehaviour
 
     /// <summary>Stop-motion needs an Animator to gate; without one everything runs smooth.</summary>
     private bool Stepping => stopMotion && _animator != null;
+
+    /// <summary>True while it is vanished after a touch (F82: StalkerVoice stays quiet then).</summary>
+    public bool IsHiddenAfterTouch => _hiddenAfterTouch;
+
+    /// <summary>World position of its head height (F82: where the speech bubble is anchored and sight is tested from).</summary>
+    public Vector3 HeadWorldPosition => transform.position + Vector3.up * HeadHeight;
 
     /// <summary>Called once by MazeGenerator.SetUpAtmosphere, after every system it reads exists. The
     /// NavMeshAgent itself is added and warped earlier, by MazeGenerator.BuildStalker.</summary>
@@ -295,7 +313,33 @@ public class Stalker : MonoBehaviour
         // F75: registers as a silent door-breaker - it slips under a closed shutter with no slam, no
         // stall (contrast AIFollower's own registration).
         DoorBreakers.Register(transform, _agent, true, null);
+
+        // F82: Stan talks. The voice owns the speech bubble; its eyes flare per blipped letter through a
+        // MaterialPropertyBlock (the shared Stalker_Eyes material is never touched).
+        FindEyeRenderers();
+        _voice = GetComponent<StalkerVoice>();
+        if (_voice == null) _voice = gameObject.AddComponent<StalkerVoice>();
+        _voice.Configure(this, phraseBook, player, torchCamera, stealth, hunter, outcome, _audio);
+
         _configured = true;
+    }
+
+    /// <summary>The two emissive eye spheres (names contain "Eye_Glow"); remembers the shared material's emission once.</summary>
+    private void FindEyeRenderers()
+    {
+        List<Renderer> eyes = new List<Renderer>();
+        foreach (Renderer renderer in _renderers)
+        {
+            if (renderer != null && renderer.name.Contains("Eye_Glow")) eyes.Add(renderer);
+        }
+        _eyeRenderers = eyes.ToArray();
+        _eyeBaseEmission = new Color[_eyeRenderers.Length];
+        for (int i = 0; i < _eyeRenderers.Length; i++)
+        {
+            Material shared = _eyeRenderers[i].sharedMaterial;
+            _eyeBaseEmission[i] = shared != null && shared.HasProperty(EmissionColorId) ? shared.GetColor(EmissionColorId) : Color.white;
+        }
+        _eyeBlock = new MaterialPropertyBlock();
     }
 
     private void OnDestroy()
@@ -350,6 +394,8 @@ public class Stalker : MonoBehaviour
         }
         if (_animator != null) _animator.speed = 0f;
         CancelBehaviours();
+        // F82: an ending clears any open bubble at once (not on the title-screen freeze - nothing to clear there).
+        if (_voice != null && (GameOutcome.IsOver || (_outcome != null && _outcome.IsEnding))) _voice.Silence();
     }
 
     /// <summary>Ends any lunge/watch and returns to Roam; restores the agent's base acceleration.</summary>
@@ -391,7 +437,7 @@ public class Stalker : MonoBehaviour
     /// via QueryTriggerInteraction.Ignore) - and the player's own hierarchy, since the camera sits
     /// inside/near the player's body (same reasoning as AIFollower.HasLineOfSightIgnoring). Blocked only
     /// by something that is not part of either.</summary>
-    private bool HasClearLine(Vector3 from, Vector3 to)
+    internal bool HasClearLine(Vector3 from, Vector3 to)
     {
         Vector3 ray = to - from;
         float distance = ray.magnitude;
@@ -432,6 +478,9 @@ public class Stalker : MonoBehaviour
             // "a single tick when it freezes within 8 m" - the moment it goes from moving to lit-frozen.
             float d = _player != null ? Vector3.Distance(transform.position, _player.position) : float.MaxValue;
             if (d <= SingleTickRange && _audio != null && _tickClip != null) _audio.PlayOneShot(_tickClip, 0.6f);
+
+            // F82: only remarks on it if he can see you - "too bright" at your back would be nonsense.
+            if (_voice != null && _voice.CanSeePlayer) _voice.Say(StalkerPhraseBook.Category.Lit);
 
             _litSince = Time.time;
             _nextLitTwitchAt = Time.time + Random.Range(litTwitchIntervalMin, litTwitchIntervalMax);
@@ -557,6 +606,7 @@ public class Stalker : MonoBehaviour
         {
             _mode = Mode.Watch;
             _watchEndsAt = Time.time + Random.Range(watchSecondsMin, watchSecondsMax);
+            if (_voice != null) _voice.Say(StalkerPhraseBook.Category.Staring);
         }
     }
 
@@ -569,6 +619,7 @@ public class Stalker : MonoBehaviour
         _nextStepIn = 1f / Mathf.Max(1f, lungeStepFps);
         _stepAccum = _nextStepIn;
         if (_audio != null && _skitterClip != null) _audio.PlayOneShot(_skitterClip, 0.7f);
+        if (_voice != null) _voice.Say(StalkerPhraseBook.Category.Lunge);
     }
 
     private void EndLunge()
@@ -754,6 +805,31 @@ public class Stalker : MonoBehaviour
     {
         if (!_configured || _animator == null || _hiddenAfterTouch) return;
         ApplyPose();
+        ApplyEyeFlare();
+    }
+
+    /// <summary>F82: eyes brighten x(1 + flare) while a speech letter blips - per-renderer property block
+    /// over the base emission read once from the shared material. Written only when the value changes.</summary>
+    private void ApplyEyeFlare()
+    {
+        if (_voice == null || _eyeRenderers == null) return;
+        float flare = _voice.EyeFlare;
+        if (Mathf.Approximately(flare, _appliedFlare)) return;
+        _appliedFlare = flare;
+
+        for (int i = 0; i < _eyeRenderers.Length; i++)
+        {
+            Renderer eye = _eyeRenderers[i];
+            if (eye == null) continue;
+            if (flare <= 0f)
+            {
+                eye.SetPropertyBlock(null);
+                continue;
+            }
+            eye.GetPropertyBlock(_eyeBlock);
+            _eyeBlock.SetColor(EmissionColorId, _eyeBaseEmission[i] * (1f + flare));
+            eye.SetPropertyBlock(_eyeBlock);
+        }
     }
 
     /// <summary>Weeping-angel micro-movement while lit: the head (only) snaps a few degrees and ticks
@@ -806,6 +882,8 @@ public class Stalker : MonoBehaviour
             Rot(_head, yawedRight, _headPitch);
             Vector3 headForward = Quaternion.AngleAxis(yaw, Vector3.up) * fwd;
             Rot(_head, headForward, _tiltSign * headTilt + _twitchRoll + _litRoll);
+            // F82: the head dips on each blipped letter of a speech line (decays in StalkerVoice).
+            if (_voice != null) Rot(_head, yawedRight, _voice.NodDegrees);
         }
     }
 
@@ -881,7 +959,9 @@ public class Stalker : MonoBehaviour
         _hunter.HearNoise(_player.position, 40f);
         _hunter.ForceLastKnownPosition(_player.position);
         _torch?.Drain(0.25f);
-        _hud?.ShowSubtitle("IT SCREAMED.", 2.5f);
+        // F82: the touch line replaces the subtitle (the shriek stays); the bubble finishes after he vanishes.
+        if (_voice != null) _voice.Say(StalkerPhraseBook.Category.Touch);
+        else _hud?.ShowSubtitle("IT SCREAMED.", 2.5f);
 
         HideAndRespawn();
     }

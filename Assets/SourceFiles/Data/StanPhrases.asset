@@ -1,0 +1,70 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: e83606f83acda824eb8bebc48e19bab3, type: 3}
+  m_Name: StanPhrases
+  m_EditorClassIdentifier: Assembly-CSharp::StalkerPhraseBook
+  spotted:
+  - there you are.
+  - i see you.
+  - found you.
+  - hello again.
+  - peekaboo.
+  - don't run. please run.
+  - you look tired.
+  - i was waiting.
+  lit:
+  - too bright.
+  - you can't keep it on forever.
+  - click. click.
+  - blink.
+  - i'll wait.
+  - your battery is dying.
+  - statue game?
+  - don't look away.
+  staring:
+  - stay still.
+  - "one\u2026 two\u2026"
+  - shhh.
+  - let me look at you.
+  - closer.
+  - don't move.
+  lunge:
+  - BOO.
+  - TAG!
+  - "GOT YOU\u2014"
+  - MINE.
+  - NOW.
+  touch:
+  - tag. you're it.
+  - warm.
+  - he heard that.
+  - i told him where you are.
+  - your light tastes good.
+  lost:
+  - where did you go?
+  - hide and seek, then.
+  - i can hear you breathing.
+  - you'll come back.
+  - "ready or not\u2026"
+  locker:
+  - knock knock.
+  - i know which one.
+  - it's cramped in there, isn't it?
+  - come out, come out.
+  - i can wait all night.
+  idle:
+  - do you like the maze?
+  - he's closer than me.
+  - floor {floor}. not many left.
+  - your heart is loud.
+  - the stars aren't for you.
+  - keep walking.

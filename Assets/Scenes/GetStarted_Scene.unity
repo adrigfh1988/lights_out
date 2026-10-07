@@ -58281,7 +58281,7 @@ MonoBehaviour:
   aiFollower: {fileID: 461847994690786}
   disablePlayerJump: 1
   useFloorProfile: 1
-  debugFloor: 1
+  debugFloor: 5
   lockerCount: 10
   lockerWidth: 0.9
   lockerDepth: 0.6
@@ -65487,6 +65487,7 @@ GameObject:
   - component: {fileID: 713959570346485}
   - component: {fileID: 965444591281647}
   - component: {fileID: 461847994690786}
+  - component: {fileID: 965444591281648}
   m_Layer: 0
   m_Name: Weeping_Angel
   m_TagString: Untagged
@@ -65533,6 +65534,43 @@ NavMeshAgent:
   m_BaseOffset: 0
   m_WalkableMask: 4294967295
   m_ObstacleAvoidanceType: 4
+--- !u!114 &965444591281648
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 565214961490967}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6410ecd2f1527de48bb2f345a783743d, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::HunterVoice
+  minGapSeconds: 5
+  blipVolume: 0.35
+  nodDegrees: 4
+  nodSeconds: 0.1
+  flareSeconds: 0.12
+  phraseBook: {fileID: 11400000, guid: 4ab21b77b86fe104d97680d3e5b7aace, type: 2}
+  spottedAfterUnseen: 4
+  chasingAfterSeen: 6
+  chasingQuietSeconds: 7
+  lostChance: 0.7
+  searchTalkRange: 14
+  searchTalkChance: 0.35
+  searchTalkInterval: 2
+  lockerRange: 4
+  ambushSpringWindow: 1
+  bubbleRange: 25
+  bubbleAboveHead: 0.45
+  cooldownSpotted: 12
+  cooldownChasing: 10
+  cooldownLost: 15
+  cooldownSearching: 12
+  cooldownAmbush: 10
+  cooldownLocker: 20
+  cooldownDoor: 12
+  cooldownCaught: 2
 --- !u!33 &80200681756133947
 MeshFilter:
   m_ObjectHideFlags: 0
@@ -100817,6 +100855,51 @@ MonoBehaviour:
   m_Script: {fileID: 11500000, guid: 3e6626231e24d2344a2d6ff04ff75b15, type: 3}
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::Stalker
+  stalkSpeed: 3.6
+  roamSpeed: 2.4
+  roamMinDistanceToPlayer: 10
+  roamCandidates: 8
+  roamRepickSeconds: 8
+  stopMotion: 1
+  stepFpsMin: 9
+  stepFpsMax: 14
+  lungeStepFps: 18
+  stepBodyTranslation: 1
+  stalkMotionSpeed: 1.45
+  roamMotionSpeed: 1.15
+  lungeMotionSpeed: 2
+  animSpeedScale: 1.35
+  spineHunch: 10
+  chestHunch: 12
+  neckForward: 8
+  headTilt: 16
+  lungeExtraHunch: 18
+  lungeArmReach: 55
+  headTrackRange: 16
+  headYawLimit: 80
+  headPitchLimit: 35
+  headTwitchIntervalMin: 1.5
+  headTwitchIntervalMax: 4
+  headTwitchAngle: 14
+  lungeSpeed: 6.5
+  lungeAcceleration: 120
+  lungeSeconds: 0.6
+  lungeCooldown: 5
+  lungeTriggerRange: 12
+  lungeMinLitSeconds: 0.4
+  watchChance: 0.5
+  watchMinDistance: 6
+  watchMaxDistance: 16
+  watchViewAngle: 30
+  watchSecondsMin: 1.2
+  watchSecondsMax: 2.5
+  watchCooldown: 10
+  litTwitch: 1
+  litTwitchRange: 7
+  litTwitchIntervalMin: 3
+  litTwitchIntervalMax: 6
+  litTwitchAngle: 12
+  phraseBook: {fileID: 11400000, guid: 89194b9c21015634ca40ad98c1ca7a31, type: 2}
 --- !u!23 &6126252338695193713
 MeshRenderer:
   m_ObjectHideFlags: 0

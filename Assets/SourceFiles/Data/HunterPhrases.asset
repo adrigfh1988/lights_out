@@ -1,0 +1,62 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: d173e5db077825c4983d88a322393b83, type: 3}
+  m_Name: HunterPhrases
+  m_EditorClassIdentifier: Assembly-CSharp::HunterPhraseBook
+  spotted:
+  - don't blink.
+  - there's my little light.
+  - run.
+  - you're mine.
+  - too slow.
+  - i smell your battery.
+  - hello, thief.
+  chasing:
+  - run faster.
+  - your legs are tired.
+  - i don't get tired.
+  - "closer\u2026"
+  - the stars won't save you.
+  - keep running. i like it.
+  lost:
+  - you can't hide forever.
+  - i'll find you.
+  - i know this maze better.
+  - hiding? good.
+  searching:
+  - "where are you\u2026"
+  - come out.
+  - i can hear your heart.
+  - "little light, little light\u2026"
+  - the dark is mine.
+  - floor {floor}. you won't leave it.
+  ambush:
+  - SURPRISE.
+  - WAITED SO LONG.
+  - THIS WAY? GOOD.
+  - HELLO.
+  locker:
+  - is someone in there?
+  - i smell you.
+  - open up.
+  - "one of these\u2026"
+  - warm metal.
+  door:
+  - doors don't stop me.
+  - let me in.
+  - knock knock.
+  - no more doors.
+  caught:
+  - GOTCHA.
+  - MINE.
+  - LIGHTS OUT.
+  - FOUND YOU.

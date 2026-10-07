@@ -1,7 +1,7 @@
 using UnityEngine;
 
 /// <summary>
-/// Synthesised sounds for the Weeping Angel: a dissonant stone-choir that follows it, and the sting
+/// Synthesised sounds for the hunter (AIFollower - the class name predates "Weeping Angel" moving to Stan): a dissonant stone-choir that follows it, and the sting
 /// when it starts hunting you. Built in code like the rest of the dread audio, so there is no clip to
 /// import - and nothing here is noise-based, which is what made the old pitched-down sci-fi hum read
 /// as radio static.
