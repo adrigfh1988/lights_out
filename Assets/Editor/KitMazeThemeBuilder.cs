@@ -182,6 +182,7 @@ public static class KitMazeThemeBuilder
         SetPieceDecalFix.Apply();
         CorpseUpgrade.Apply();
         PackDressing.Apply();
+        PrimitiveDressingCleanup.Apply(); // F89
 
         Selection.activeGameObject = root;
         SceneView.lastActiveSceneView?.FrameSelected();

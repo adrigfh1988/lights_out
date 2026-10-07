@@ -92,6 +92,13 @@ public static class ProjectSetup
         },
         new Piece
         {
+            Name = "Primitive dressing cleanup (F89)",
+            FixMenu = "Build Missing Pieces (or any Build > Floor Themes / Kit Maze Theme run)",
+            Problem = () => PrimitiveDressingCleanup.NeedsUpgrade() ? "untextured primitive props / set pieces (or their prefabs) are still in a gallery row or the kit maze" : null,
+            Build = () => PrimitiveDressingCleanup.Apply()
+        },
+        new Piece
+        {
             Name = "Kit maze theme",
             FixMenu = "Build > Kit Maze Theme",
             Problem = () =>

@@ -25,8 +25,10 @@ public static partial class FloorThemeBuilder
         Storage = 64, Furniture = 128, Paintings = 256, Weapons = 512, Rugs = 1024,
         // F85: the shop's big furniture as standing / hung wall props (plannings/pack-dressing-plan.md section B).
         Cabinets = 2048, Shelves = 4096, Tables = 8192, Workshop = 16384, Sink = 32768, Stove = 65536, Alembic = 131072, Nursery = 262144,
+        // F89: pack stand-ins for primitive props (FloorThemeBuilder.Cleanup.cs).
+        Crates = 524288, Candles = 1048576, Urns = 2097152, SpecimenShelf = 4194304, Boards = 8388608,
         Legacy = 2047,
-        FurnitureAll = Cabinets | Shelves | Tables | Workshop | Sink | Stove | Alembic | Nursery,
+        FurnitureAll = Cabinets | Shelves | Tables | Workshop | Sink | Stove | Alembic | Nursery | Crates | Candles | Urns | SpecimenShelf | Boards,
         All = ~0
     }
 
@@ -38,13 +40,13 @@ public static partial class FloorThemeBuilder
         AlchemistSet.Books | AlchemistSet.Bottles | AlchemistSet.Dishes | AlchemistSet.Storage | AlchemistSet.Furniture | AlchemistSet.Paintings | AlchemistSet.Rugs
             | AlchemistSet.Cabinets | AlchemistSet.Sink,
         AlchemistSet.Bottles | AlchemistSet.Dishes | AlchemistSet.Storage | AlchemistSet.Furniture
-            | AlchemistSet.Shelves | AlchemistSet.Workshop | AlchemistSet.Stove,
+            | AlchemistSet.Shelves | AlchemistSet.Workshop | AlchemistSet.Stove | AlchemistSet.Crates,
         // Crypt also carries the Hollow-only pieces (Stove, Nursery): floor 5 plays the Crypt row, not the Hollow (7 Oct 2026).
         AlchemistSet.Legacy | AlchemistSet.Cabinets | AlchemistSet.Shelves | AlchemistSet.Tables | AlchemistSet.Workshop | AlchemistSet.Alembic
-            | AlchemistSet.Stove | AlchemistSet.Nursery,
+            | AlchemistSet.Stove | AlchemistSet.Nursery | AlchemistSet.Candles | AlchemistSet.Urns,
         AlchemistSet.Books | AlchemistSet.Bottles | AlchemistSet.Lab | AlchemistSet.Organic | AlchemistSet.Specimens | AlchemistSet.Furniture
-            | AlchemistSet.Sink | AlchemistSet.Workshop | AlchemistSet.Alembic | AlchemistSet.Nursery,
-        AlchemistSet.Legacy | AlchemistSet.Cabinets | AlchemistSet.Shelves | AlchemistSet.Tables | AlchemistSet.Stove | AlchemistSet.Nursery
+            | AlchemistSet.Sink | AlchemistSet.Workshop | AlchemistSet.Alembic | AlchemistSet.Nursery | AlchemistSet.SpecimenShelf | AlchemistSet.Boards,
+        AlchemistSet.Legacy | AlchemistSet.Cabinets | AlchemistSet.Shelves | AlchemistSet.Tables | AlchemistSet.Stove | AlchemistSet.Nursery | AlchemistSet.Candles
     };
 
     /// <summary>The kit maze's subset. Kit mode forces wall/ceiling prop chances to 0, so only the Floor and FloorDecal kinds of these are ever listed (see KitPropFilter).</summary>
@@ -172,7 +174,7 @@ public static partial class FloorThemeBuilder
             Hung("Alch_Painting2", AlchemistSet.Paintings, 0.10f, 0.6f, r => HangFlat(r, M + "painting02", 0f, 1.55f, -4f, 180f, 1.8f)), // this frame's picture faces -Z at its default yaw
             Hung("Alch_Painting3", AlchemistSet.Paintings, 0.10f, 0.6f, r => HangFlat(r, M + "painting03", 0f, 1.45f, 2.5f, scale: 1.3f)),
             Hung("Alch_Painting4", AlchemistSet.Paintings, 0.10f, 0.6f, r => HangFlat(r, M + "painting04", 0f, 1.45f, -3f, scale: 1.3f)),
-            Hung("Alch_Board", AlchemistSet.Paintings, 0.30f, 0.5f, r =>
+            Hung("Alch_Board", AlchemistSet.Paintings | AlchemistSet.Boards, 0.30f, 0.5f, r =>
             {
                 GameObject board = HangFlat(r, F + "Board", 0f, 1.55f, 0f);
                 HangDagger(r, board);
@@ -197,6 +199,7 @@ public static partial class FloorThemeBuilder
             Rug("Alch_Rug3", "Furniture/Carpet03"),
         };
         defs.AddRange(FurnitureDefs()); // F85
+        defs.AddRange(CleanupDefs()); // F89
         return defs;
     }
 

@@ -398,53 +398,16 @@ public static partial class FloorThemeBuilder
 
     private static PropPiece[] _commonFloorProps;
 
-    /// <summary>Papers, Debris, Bucket, Bottles - single shared prefabs in Themes/Common/Prefabs, weights fixed, added to every theme's props and to the kit set. Built once and cached.</summary>
+    /// <summary>
+    /// The shared floor props every theme and the kit maze used to list: Papers, Debris, Bucket, Bottles. They were
+    /// built from primitives with plain materials (the white sheets and grey discs on the Ward floor) and F89 removed
+    /// them: Alchemist book piles, bottles and baskets (FloorThemeBuilder.Alchemist.cs) already cover paper, bottle and
+    /// bucket, and nothing in the packs reads as debris. Kept as a call so the builders' structure is unchanged.
+    /// </summary>
     private static PropPiece[] BuildCommonFloorProps()
     {
         if (_commonFloorProps != null) return _commonFloorProps;
-
-        Material paperMat = LoadOrCreateMat(CommonRoot, "Common_Paper", new Color(0.55f, 0.55f, 0.5f), null, null, Vector2.one, null);
-        Material debrisMat = LoadOrCreateMat(CommonRoot, "Common_Debris", new Color(0.3f, 0.3f, 0.3f), null, null, Vector2.one, null);
-        Material bucketMat = LoadOrCreateMat(CommonRoot, "Common_Bucket", new Color(0.25f, 0.25f, 0.28f), null, null, Vector2.one, null, smoothness: 0.3f);
-        Material bottleMat = LoadOrCreateMat(CommonRoot, "Common_Bottle", new Color(0.05f, 0.08f, 0.05f), null, null, Vector2.one, null, smoothness: 0.6f);
-
-        GameObject papersRoot = new GameObject("Papers");
-        System.Random papersRng = new System.Random(201);
-        int paperCount = 5 + papersRng.Next(4);
-        for (int i = 0; i < paperCount; i++)
-        {
-            float px = (float)(papersRng.NextDouble() - 0.5) * 0.35f;
-            float pz = (float)papersRng.NextDouble() * 0.3f;
-            float yaw = (float)papersRng.NextDouble() * 360f;
-            GameObject sheet = Box(papersRoot.transform, $"Sheet{i}", new Vector3(px, 0.0015f * (i + 1), pz), new Vector3(0.21f, 0.003f, 0.3f), paperMat);
-            sheet.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
-        }
-        PropPiece papers = FinishProp(papersRoot, CommonRoot, PropPiece.MountKind.Floor, 0.3f, 1f);
-
-        GameObject debrisRoot = new GameObject("Debris");
-        System.Random debrisRng = new System.Random(202);
-        for (int i = 0; i < 6; i++)
-        {
-            float dx = (float)(debrisRng.NextDouble() - 0.5) * 0.4f;
-            float dz = (float)debrisRng.NextDouble() * 0.4f;
-            float s = 0.05f + (float)debrisRng.NextDouble() * 0.1f;
-            if (debrisRng.NextDouble() < 0.5) Box(debrisRoot.transform, $"Chunk{i}", new Vector3(dx, s * 0.5f, dz), Vector3.one * s, debrisMat);
-            else Sphere(debrisRoot.transform, $"Chunk{i}", new Vector3(dx, s * 0.5f, dz), Vector3.one * s, debrisMat);
-        }
-        PropPiece debris = FinishProp(debrisRoot, CommonRoot, PropPiece.MountKind.Floor, 0.4f, 1f);
-
-        GameObject bucketRoot = new GameObject("Bucket");
-        GameObject bucketBody = CylinderRH(bucketRoot.transform, "Body", new Vector3(0f, 0.15f, 0.2f), 0.15f, 0.3f, bucketMat);
-        bucketBody.transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
-        PropPiece bucket = FinishProp(bucketRoot, CommonRoot, PropPiece.MountKind.Floor, 0.35f, 0.7f);
-
-        GameObject bottlesRoot = new GameObject("Bottles");
-        CylinderRH(bottlesRoot.transform, "Bottle0", new Vector3(-0.1f, 0.08f, 0.15f), 0.03f, 0.18f, bottleMat).transform.localRotation = Quaternion.Euler(0f, 0f, 80f);
-        CylinderRH(bottlesRoot.transform, "Bottle1", new Vector3(0.05f, 0.09f, 0.2f), 0.03f, 0.18f, bottleMat);
-        CylinderRH(bottlesRoot.transform, "Bottle2", new Vector3(0.15f, 0.09f, 0.1f), 0.03f, 0.18f, bottleMat);
-        PropPiece bottles = FinishProp(bottlesRoot, CommonRoot, PropPiece.MountKind.Floor, 0.3f, 0.7f);
-
-        _commonFloorProps = new[] { papers, debris, bucket, bottles };
+        _commonFloorProps = new PropPiece[0];
         return _commonFloorProps;
     }
 
@@ -481,7 +444,6 @@ public static partial class FloorThemeBuilder
         if (_fallenRunner != null) return _fallenRunner;
 
         Material clothMat = LoadOrCreateMat(CommonRoot, "Common_TarpCloth", new Color(0.07f, 0.07f, 0.08f), null, null, Vector2.one, null);
-        Material torchMat = LoadOrCreateMat(CommonRoot, "Common_Torch", new Color(0.12f, 0.12f, 0.12f), null, null, Vector2.one, null, smoothness: 0.4f);
 
         GameObject root = new GameObject("FallenRunner");
 
@@ -494,8 +456,7 @@ public static partial class FloorThemeBuilder
         // With Assets/DeadBody LITE present the capsules above give way to its six corpses (ModelVariants).
         CorpseUpgrade.AddBodies(root.transform);
 
-        GameObject torch = CylinderRH(root.transform, "Torch", new Vector3(0.5f, 0.05f, 1.08f), 0.025f, 0.22f, torchMat);
-        torch.transform.localRotation = Quaternion.Euler(0f, 0f, 75f);
+        DressTorch(root); // the dropped torch is the pack's oil lamp (F89)
 
         GameObject lightGo = new GameObject("Light");
         lightGo.transform.SetParent(root.transform, false);
