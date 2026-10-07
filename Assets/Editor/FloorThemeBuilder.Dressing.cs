@@ -389,7 +389,7 @@ public static partial class FloorThemeBuilder
             CreateDecalProp(folder, $"{prefix}_Drip", dripMat, PropPiece.MountKind.WallDecal, new Vector2(0.8f, 1.4f), 1f),
             CreateDecalProp(folder, $"{prefix}_BloodPool", common.BloodPool, PropPiece.MountKind.FloorDecal, new Vector2(0.8f, 1.6f), 1f * bloodWeightScale),
             CreateDecalProp(folder, $"{prefix}_DragMarks", common.DragMarks, PropPiece.MountKind.FloorDecal, new Vector2(1.5f, 2.5f), 0.7f, randomRoll: false),
-            CreateDecalProp(folder, $"{prefix}_Footprints", common.Footprints, PropPiece.MountKind.FloorDecal, new Vector2(1.2f, 1.8f), 0.7f, randomRoll: false),
+            // No footprints since 7 Oct 2026 - they read as clip art; BloodDecalUpgrade turns the ones in older builds into blood.
             CreateDecalProp(folder, $"{prefix}_FloorGrime", floorGrimeMat, PropPiece.MountKind.FloorDecal, new Vector2(1.2f, 2.2f), 2f),
         };
     }
@@ -491,6 +491,9 @@ public static partial class FloorThemeBuilder
         GameObject arm = Capsule(root.transform, "Arm", new Vector3(0.35f, 0.1f, 0.95f), new Vector3(0.1f, 0.3f, 0.1f), clothMat);
         arm.transform.localRotation = Quaternion.Euler(0f, 25f, 85f);
 
+        // With Assets/DeadBody LITE present the capsules above give way to its six corpses (ModelVariants).
+        CorpseUpgrade.AddBodies(root.transform);
+
         GameObject torch = CylinderRH(root.transform, "Torch", new Vector3(0.5f, 0.05f, 1.08f), 0.025f, 0.22f, torchMat);
         torch.transform.localRotation = Quaternion.Euler(0f, 0f, 75f);
 
@@ -508,7 +511,7 @@ public static partial class FloorThemeBuilder
 
         CreateDecalQuad(root.transform, "BloodPoolDecal", common.BloodPool, true, new Vector3(0f, 0.006f, 0.55f), Quaternion.Euler(0f, 20f, 0f), 1.2f);
         CreateDecalQuad(root.transform, "DragMarksDecal", common.DragMarks, true, new Vector3(0f, 0.006f, 1.9f), Quaternion.identity, 2.0f);
-        CreateDecalQuad(root.transform, "HandprintDecal", common.Handprint, false, new Vector3(0f, 1.3f, 1.98f), Quaternion.identity, 0.28f);
+        CreateDecalQuad(root.transform, "HandprintDecal", common.Handprint, false, new Vector3(0f, 1.3f, WallDecalInset), Quaternion.identity, 0.28f);
 
         ConfigureFlicker(root, FlickerLight.FlickerMode.Faulty, spot, null);
 

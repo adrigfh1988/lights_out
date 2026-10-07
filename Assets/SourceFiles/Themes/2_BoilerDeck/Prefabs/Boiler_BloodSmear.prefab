@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 6145453410847643445}
   - component: {fileID: 4083155878252851024}
+  - component: {fileID: 458812660721208664}
   m_Layer: 0
   m_Name: Boiler_BloodSmear
   m_TagString: Untagged
@@ -51,6 +52,28 @@ MonoBehaviour:
   enabledInMaze: 1
   decalSizeRange: {x: 0.8, y: 1.6}
   randomRoll: 1
+--- !u!114 &458812660721208664
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 968435877084432542}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 39d3c03cb82bdc243b28c38be8f28c01, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DecalVariants
+  materials:
+  - {fileID: 2100000, guid: 7e2d9c585bf9b2b4fbfaf34f65de1d62, type: 2}
+  - {fileID: 2100000, guid: dd3103708e10d4847a87853188f07311, type: 2}
+  - {fileID: 2100000, guid: 072f91e3968600f4596db8e7c1e71a86, type: 2}
+  - {fileID: 2100000, guid: c3c2297eb48fc2f4ea6bcc338a4cbfcb, type: 2}
+  aspects:
+  - 2.56
+  - 2.9257143
+  - 2.9257143
+  - 2.9257143
 --- !u!1 &6400078210295046633
 GameObject:
   m_ObjectHideFlags: 0
@@ -79,7 +102,7 @@ Transform:
   serializedVersion: 2
   m_LocalRotation: {x: 0, y: 1, z: 0, w: -0.00000004371139}
   m_LocalPosition: {x: 0, y: 0, z: 0}
-  m_LocalScale: {x: 1, y: 1, z: 1}
+  m_LocalScale: {x: 1, y: 0.390625, z: 1}
   m_ConstrainProportionsScale: 0
   m_Children: []
   m_Father: {fileID: 6145453410847643445}
@@ -117,7 +140,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: ba9a43b04373fc646b1db4acd182c0a2, type: 2}
+  - {fileID: 2100000, guid: 7e2d9c585bf9b2b4fbfaf34f65de1d62, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0

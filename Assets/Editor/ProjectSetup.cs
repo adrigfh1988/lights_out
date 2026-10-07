@@ -57,6 +57,27 @@ public static class ProjectSetup
         },
         new Piece
         {
+            Name = "Blood decals (Blood decal pack)",
+            FixMenu = "Build Missing Pieces (or any Build > Floor Themes / Kit Maze Theme run)",
+            Problem = () => BloodDecalUpgrade.NeedsUpgrade() ? "some blood decals still use the code-drawn placeholder textures" : null,
+            Build = () => BloodDecalUpgrade.Apply()
+        },
+        new Piece
+        {
+            Name = "Set-piece decals",
+            FixMenu = "Build Missing Pieces (or any Build > Floor Themes / Kit Maze Theme run)",
+            Problem = () => SetPieceDecalFix.NeedsFix() ? "set-piece wall decals float 2 m off their wall, or blood quads are mis-shaped" : null,
+            Build = () => SetPieceDecalFix.Apply()
+        },
+        new Piece
+        {
+            Name = "Corpses (DeadBody LITE)",
+            FixMenu = "Build Missing Pieces (or any Build > Floor Themes / Kit Maze Theme run)",
+            Problem = () => CorpseUpgrade.NeedsUpgrade() ? "the FallenRunner set piece still has the primitive capsule body" : null,
+            Build = () => CorpseUpgrade.Apply()
+        },
+        new Piece
+        {
             Name = "Kit maze theme",
             FixMenu = "Build > Kit Maze Theme",
             Problem = () =>

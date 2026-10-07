@@ -10,6 +10,7 @@ GameObject:
   m_Component:
   - component: {fileID: 4970361339046398479}
   - component: {fileID: 959334220017858036}
+  - component: {fileID: 4213705817077174988}
   m_Layer: 0
   m_Name: Boiler_BloodPool
   m_TagString: Untagged
@@ -51,6 +52,26 @@ MonoBehaviour:
   enabledInMaze: 1
   decalSizeRange: {x: 0.8, y: 1.6}
   randomRoll: 1
+--- !u!114 &4213705817077174988
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 5255924557711442894}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 39d3c03cb82bdc243b28c38be8f28c01, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: Assembly-CSharp::DecalVariants
+  materials:
+  - {fileID: 2100000, guid: d572832d161f1314ab7191bff7b15608, type: 2}
+  - {fileID: 2100000, guid: 79dacc58bbc8496458b0961061ed5f44, type: 2}
+  - {fileID: 2100000, guid: 040f87575f724b947aa2025cc1c1dcec, type: 2}
+  aspects:
+  - 1
+  - 1
+  - 1
 --- !u!1 &8884640220440267297
 GameObject:
   m_ObjectHideFlags: 0
@@ -117,7 +138,7 @@ MeshRenderer:
   m_RenderingLayerMask: 1
   m_RendererPriority: 0
   m_Materials:
-  - {fileID: 2100000, guid: ebd7e34b603abc742a7de5367b47e48f, type: 2}
+  - {fileID: 2100000, guid: d572832d161f1314ab7191bff7b15608, type: 2}
   m_StaticBatchInfo:
     firstSubMesh: 0
     subMeshCount: 0

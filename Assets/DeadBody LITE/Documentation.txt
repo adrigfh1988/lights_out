@@ -1,0 +1,48 @@
+	
+- - - - - - - - - - - - - - - - - - - - - Dead Body 3D LITE  - - - - - - - - - - - - - - - - - - - - - - - - - - - - 
+
+This pack contains 3d Model of a Deadbody. Pack includes Hospital bed & Bathtub models. You can use this pack commercially.
+
+Note : This is a Lite version of the asset "Deadbody 3D Animated"
+whats new in the full version : 10 Animations (Idle, Wake, Sleep, Hurt.etc)
+
+Technical Details:-
+		- Models Included : Deadbody,Hospital Bed, Bath tubs
+		- Poly count (in Tris) :  1440 (Dead body), 3773(Bed), 12k(Bathtub with Blood and Bodies)
+		- Animations : N0
+		- LOD : No
+		- Prefab Variation's : 6 (Body), 5 (Bed), 6(Dead body in Bed)
+		- Used Material(s) : URP/Lit
+		- Texture maps : PBR (Albedo/Base Color, Metallic Smoothness, Normal map)
+		- Texture Size : 2048(.png)
+		- Simple colliders, Mesh colliders attached
+	
+Features:-
+- Lowpoly Optimized models for PC and Mobile games.
+- Each model comes with multiple color variation's
+- Easy to modify
+- Drag and drop to use
+- Model scaled to approximate real world size.
+- All nodes, materials and textures are appropriately named.
+
+Folder details:-
+
+	Materials : Where the materials for the model located.
+	
+	Meshes : Contain FBX format of the 3d model.
+	
+	Textures : Contains Textures, that are in (.PNG) file format
+	
+	(Other folders - Prefabs, Scenes)
+
+Notes:
+Support URP, HDRP, LWRP, Built-in Render Pipeline
+This project is submitted using Universal Render Pipeline. If you are not using URP, you need to manually reset the shader of the model to avoid it being pink
+
+How to use:-	
+	- Simply drag and drop the prefab from prefab folder to your scene and use it.
+
+About Me : "SR Studios Kerala", Indie Game developer & 2D-3D Artist from Alappuzha, Kerala, India
+Contact : srstudioskerala@gmail.com
+
+................Thank you for downloading this package................................

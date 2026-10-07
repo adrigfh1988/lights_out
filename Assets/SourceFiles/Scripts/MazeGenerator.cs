@@ -80,6 +80,12 @@ public class MazeGenerator : MonoBehaviour
     [Tooltip("Looping track under the title and rules screens (Discovering Rooms); fades out on START.")]
     [SerializeField] private AudioClip menuMusic;
 
+    [Header("Decals")]
+    [Tooltip("Multiplies the theme's wall/floor decal chances (capped at 0.9 per roll) and, above 1, allows one more decal per cell. 1 = the theme's own numbers.")]
+    [SerializeField, Min(0f)] private float decalDensity = 2f;
+    [Tooltip("Extra pick weight for decals with look-alike variants (the Blood decal pack splats/smears/pools) over grime, drips and the rest. 1 = the prefab's own weight.")]
+    [SerializeField, Min(0f)] private float bloodWeight = 3f;
+
     [Header("Actors")]
     [SerializeField] private NavMeshSurface navMeshSurface;
     [SerializeField] private AIFollower aiFollower;
@@ -1200,13 +1206,14 @@ public class MazeGenerator : MonoBehaviour
     }
 
     /// <summary>Weighted pick among a theme's props of one mount kind, honouring EnabledInMaze. Null if the theme has none of that kind (or none currently enabled).</summary>
-    private static PropPiece PickWeightedProp(PropPiece[] props, PropPiece.MountKind mount, System.Random rng)
+    /// <param name="variantWeight">Multiplies the weight of a piece carrying DecalVariants (the blood pack decals). 1 = unchanged.</param>
+    private static PropPiece PickWeightedProp(PropPiece[] props, PropPiece.MountKind mount, System.Random rng, float variantWeight = 1f)
     {
         float totalWeight = 0f;
         foreach (PropPiece candidate in props)
         {
             if (candidate == null || candidate.Mount != mount || !candidate.EnabledInMaze) continue;
-            totalWeight += Mathf.Max(0.0001f, candidate.Weight);
+            totalWeight += PickWeight(candidate, variantWeight);
         }
         if (totalWeight <= 0f) return null;
 
@@ -1215,11 +1222,17 @@ public class MazeGenerator : MonoBehaviour
         foreach (PropPiece candidate in props)
         {
             if (candidate == null || candidate.Mount != mount || !candidate.EnabledInMaze) continue;
-            cumulative += Mathf.Max(0.0001f, candidate.Weight);
+            cumulative += PickWeight(candidate, variantWeight);
             if (roll <= cumulative) return candidate;
         }
 
         return null; // floating point edge case only
+    }
+
+    private static float PickWeight(PropPiece candidate, float variantWeight)
+    {
+        float weight = Mathf.Max(0.0001f, candidate.Weight);
+        return variantWeight != 1f && candidate.GetComponent<DecalVariants>() != null ? weight * variantWeight : weight;
     }
 
     /// <summary>
@@ -1298,6 +1311,8 @@ public class MazeGenerator : MonoBehaviour
             SetPiece clone = Instantiate(piece, pos, Quaternion.LookRotation(-dir), _setPiecesGroup);
             clone.gameObject.SetActive(true);
             clone.name = $"SetPiece_{piece.name}_{cell.x}_{cell.y}";
+            // Look-alike models (the FallenRunner's corpses), picked by a hash of the cell - no rng draw.
+            if (clone.TryGetComponent(out ModelVariants models)) models.Apply((cell.x * 73856093) ^ (cell.y * 19349663) ^ 0x5EED);
 
             foreach (FlickerLight flicker in clone.GetComponentsInChildren<FlickerLight>(true))
             {
@@ -1425,6 +1440,11 @@ public class MazeGenerator : MonoBehaviour
         float backFaceDistance = cellSize * 0.5f - wallThickness * 0.5f;
         List<Vector3> walls = new List<Vector3>(4);
 
+        // decalDensity / bloodWeight: only this pass's own +7 stream changes, nothing after it reads it.
+        float wallChance = Mathf.Min(0.9f, _dressing.WallDecalChance * decalDensity);
+        float floorChance = Mathf.Min(0.9f, _dressing.FloorDecalChance * decalDensity);
+        int maxPerCell = _dressing.MaxDecalsPerCell + (decalDensity > 1f ? 1 : 0);
+
         for (int x = 0; x < width; x++)
         {
             for (int z = 0; z < height; z++)
@@ -1437,9 +1457,9 @@ public class MazeGenerator : MonoBehaviour
                 Vector3 lockerWallDir = _lockerWall.TryGetValue(cell, out Vector3 lw) ? lw : Vector3.zero;
                 _propWalls.TryGetValue(cell, out List<Vector3> takenWalls);
 
-                for (int i = 0; i < _dressing.MaxDecalsPerCell; i++)
+                for (int i = 0; i < maxPerCell; i++)
                 {
-                    float threshold = _dressing.WallDecalChance * (i == 0 ? 1f : 0.4f);
+                    float threshold = wallChance * (i == 0 ? 1f : 0.4f);
                     if (rng.NextDouble() >= threshold) break;
 
                     walls.Clear();
@@ -1451,7 +1471,7 @@ public class MazeGenerator : MonoBehaviour
                     if (walls.Count == 0) continue;
 
                     Vector3 dir = walls[rng.Next(walls.Count)];
-                    PropPiece decal = PickWeightedProp(_dressing.Props, PropPiece.MountKind.WallDecal, rng);
+                    PropPiece decal = PickWeightedProp(_dressing.Props, PropPiece.MountKind.WallDecal, rng, bloodWeight);
                     if (decal == null) continue;
 
                     float lateral = (float)(rng.NextDouble() * 2.0 - 1.0) * (cellSize * 0.5f - 0.8f);
@@ -1468,14 +1488,15 @@ public class MazeGenerator : MonoBehaviour
                     clone.gameObject.SetActive(true);
                     clone.transform.localScale = Vector3.one * scale;
                     clone.name = $"Decal_{decal.name}_{x}_{z}_{i}";
+                    ApplyDecalVariant(clone, x, z, i, 0);
                 }
 
-                for (int i = 0; i < _dressing.MaxDecalsPerCell; i++)
+                for (int i = 0; i < maxPerCell; i++)
                 {
-                    float threshold = _dressing.FloorDecalChance * (i == 0 ? 1f : 0.4f);
+                    float threshold = floorChance * (i == 0 ? 1f : 0.4f);
                     if (rng.NextDouble() >= threshold) break;
 
-                    PropPiece decal = PickWeightedProp(_dressing.Props, PropPiece.MountKind.FloorDecal, rng);
+                    PropPiece decal = PickWeightedProp(_dressing.Props, PropPiece.MountKind.FloorDecal, rng, bloodWeight);
                     if (decal == null) continue;
 
                     float rawX = (float)(rng.NextDouble() * 2.0 - 1.0);
@@ -1497,8 +1518,21 @@ public class MazeGenerator : MonoBehaviour
                     clone.gameObject.SetActive(true);
                     clone.transform.localScale = Vector3.one * scale;
                     clone.name = $"Decal_{decal.name}_{x}_{z}_{i}";
+                    ApplyDecalVariant(clone, x, z, i, 1);
                 }
             }
+        }
+    }
+
+    /// <summary>
+    /// A decal with DecalVariants (the blood pack splats/smears/pools) gets one of its look-alikes, picked by a
+    /// hash of where it landed - like the bottle variants, no rng draw, so the +7 stream is unchanged.
+    /// </summary>
+    private static void ApplyDecalVariant(PropPiece clone, int x, int z, int i, int floor)
+    {
+        if (clone.TryGetComponent(out DecalVariants variants))
+        {
+            variants.Apply((x * 73856093) ^ (z * 19349663) ^ (i * 83492791) ^ (floor * 2654435));
         }
     }
 

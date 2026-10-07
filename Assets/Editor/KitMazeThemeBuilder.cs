@@ -177,6 +177,11 @@ public static class KitMazeThemeBuilder
             x += ShowcaseSpacing;
         }
 
+        // Kit_Blood* decal prefabs come from BuildCommonDressing with the drawn textures; swap in the blood pack.
+        BloodDecalUpgrade.Apply();
+        SetPieceDecalFix.Apply();
+        CorpseUpgrade.Apply();
+
         Selection.activeGameObject = root;
         SceneView.lastActiveSceneView?.FrameSelected();
         EditorSceneManager.MarkSceneDirty(scene);

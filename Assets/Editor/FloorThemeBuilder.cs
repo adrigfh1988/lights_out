@@ -32,6 +32,14 @@ public static partial class FloorThemeBuilder
     // cellSize/2 - wallThickness/2 at the canonical 4.5 m cell / 0.5 m wall the pieces are authored for.
     private const float BackFaceDistance = 2.0f;
 
+    /// <summary>
+    /// How far a set piece's wall decal stands off the wall. MazeGenerator.BuildSetPieces puts a set piece's
+    /// pivot ON the wall face with +Z into the cell, so a wall decal belongs just in front of z = 0. It used to
+    /// be 1.98 (as if the wall were 2 m ahead), which hung every set-piece wall decal in mid-air - fixed 7 Oct 2026;
+    /// SetPieceDecalFix moves the ones in prefabs built before that.
+    /// </summary>
+    internal const float WallDecalInset = 0.02f;
+
     private static Material _plinthMaterial;
 
     [MenuItem("LIGHTS OUT/Build/Floor Themes", priority = 100)]
@@ -108,6 +116,10 @@ public static partial class FloorThemeBuilder
 
         // The builders' ambient colours predate the F71 darkness pass; bring the fresh rows down to it.
         DarknessRelight.Relight();
+        // The drawn blood decals are only placeholders when the Blood decal pack is in the project.
+        BloodDecalUpgrade.Apply();
+        SetPieceDecalFix.Apply();
+        CorpseUpgrade.Apply();
 
         AssetDatabase.SaveAssets();
         Selection.activeGameObject = galleryRoot;
@@ -606,7 +618,7 @@ public static partial class FloorThemeBuilder
             Box(root.transform, "Mattress", new Vector3(0f, 0.5f, 0.75f), new Vector3(1.8f, 0.12f, 0.6f), linenMat).transform.localRotation = Quaternion.Euler(0f, 0f, 90f);
             Sphere(root.transform, "PillowA", new Vector3(-0.6f, 0.1f, 0.5f), new Vector3(0.3f, 0.15f, 0.2f), linenMat);
             Sphere(root.transform, "PillowB", new Vector3(0.5f, 0.1f, 1.1f), new Vector3(0.28f, 0.14f, 0.2f), linenMat);
-            CreateDecalQuad(root.transform, "BloodSmearDecal", wardCommonDecals.BloodSmear, false, new Vector3(0f, 1.3f, 1.98f), Quaternion.identity, 1.2f);
+            CreateDecalQuad(root.transform, "BloodSmearDecal", wardCommonDecals.BloodSmear, false, new Vector3(0f, 1.3f, WallDecalInset), Quaternion.identity, 1.2f);
             for (int pi = 0; pi < 2; pi++)
             {
                 Box(root.transform, $"Paper{pi}", new Vector3(-0.3f + pi * 0.6f, 0.01f, 1.6f + pi * 0.3f), new Vector3(0.2f, 0.003f, 0.3f), linenMat).transform.localRotation = Quaternion.Euler(0f, pi * 40f, 0f);
@@ -628,7 +640,7 @@ public static partial class FloorThemeBuilder
             Box(root.transform, "BedFrame", new Vector3(0f, 0.3f, 0.7f), new Vector3(1.0f, 0.5f, 0.5f), metalMat, keepCollider: true);
             Box(root.transform, "StrapL", new Vector3(-0.3f, 0.55f, 0.7f), new Vector3(0.4f, 0.03f, 0.05f), linenMat);
             Box(root.transform, "StrapR", new Vector3(0.3f, 0.55f, 0.7f), new Vector3(0.4f, 0.03f, 0.05f), linenMat);
-            CreateDecalQuad(root.transform, "ClawDecal", wardCommonDecals.Claw, false, new Vector3(0f, 1.4f, 1.98f), Quaternion.identity, 0.7f);
+            CreateDecalQuad(root.transform, "ClawDecal", wardCommonDecals.Claw, false, new Vector3(0f, 1.4f, WallDecalInset), Quaternion.identity, 0.7f);
             return FinishSetPiece(root, folder, width: 3.0f, depth: 0.6f, weight: 1f);
         }
 
@@ -857,7 +869,7 @@ public static partial class FloorThemeBuilder
             Sphere(root.transform, "SkullA", new Vector3(-0.5f, 0.86f, 0.6f), Vector3.one * 0.14f, boneMat);
             Sphere(root.transform, "SkullB", new Vector3(0f, 0.86f, 0.6f), Vector3.one * 0.14f, boneMat);
             Sphere(root.transform, "SkullC", new Vector3(0.5f, 0.86f, 0.6f), Vector3.one * 0.14f, boneMat);
-            CreateDecalQuad(root.transform, "DripDecal", cryptCommonDecals.BloodPool, false, new Vector3(0f, 2.1f, 1.98f), Quaternion.identity, 0.9f);
+            CreateDecalQuad(root.transform, "DripDecal", cryptCommonDecals.BloodPool, false, new Vector3(0f, 2.1f, WallDecalInset), Quaternion.identity, 0.9f);
 
             GameObject lightGo = new GameObject("Light");
             lightGo.transform.SetParent(root.transform, false);
@@ -1619,7 +1631,7 @@ public static partial class FloorThemeBuilder
             for (int hI = 0; hI < 3; hI++)
             {
                 float hx = -0.6f + hI * 0.6f;
-                CreateDecalQuad(root.transform, $"Handprint{hI}", hollowCommonDecals.Handprint, false, new Vector3(hx, 1.4f, 1.98f), Quaternion.Euler(0f, 0f, hI * 15f), 0.28f);
+                CreateDecalQuad(root.transform, $"Handprint{hI}", hollowCommonDecals.Handprint, false, new Vector3(hx, 1.4f, WallDecalInset), Quaternion.Euler(0f, 0f, hI * 15f), 0.28f);
             }
 
             GameObject lightGo = new GameObject("Light");
@@ -1656,7 +1668,7 @@ public static partial class FloorThemeBuilder
                 float fx = -0.5f + fI * 0.35f;
                 Box(root.transform, $"FrameBorder{fI}", new Vector3(fx, 1.3f, 0.03f), new Vector3(0.18f, 0.22f, 0.02f), woodMat).transform.localRotation = Quaternion.Euler(0f, 0f, 25f);
             }
-            CreateDecalQuad(root.transform, "ClawDecal", hollowCommonDecals.Claw, false, new Vector3(0f, 1.6f, 1.98f), Quaternion.identity, 0.85f);
+            CreateDecalQuad(root.transform, "ClawDecal", hollowCommonDecals.Claw, false, new Vector3(0f, 1.6f, WallDecalInset), Quaternion.identity, 0.85f);
             return FinishSetPiece(root, folder, width: 1.8f, depth: 0.85f, weight: 1f);
         }
 
