@@ -100,6 +100,12 @@ public class ShopRoom : MonoBehaviour
         if (doorHinge != null)
         {
             _hingeClosed = doorHinge.localRotation;
+            foreach (Renderer r in doorHinge.GetComponentsInChildren<Renderer>())
+            {
+                if (!r.isPartOfStaticBatch) continue;
+                Debug.LogWarning("ShopRoom: the door leaf is Static, so static batching froze it shut and it will not swing. Run LIGHTS OUT > Build Missing Pieces, then save the scene.", r);
+                break;
+            }
             Bounds leaf = RendererBounds(doorHinge);
             _doorwayCentre = leaf.size == Vector3.zero ? doorHinge.position : leaf.center;
         }
@@ -231,8 +237,9 @@ public class ShopRoom : MonoBehaviour
     /// </summary>
     private IEnumerator WalkOutRoutine()
     {
+        // GameFlow.IsInShop stays true until the reload (GameFlow.Reload clears it): clearing it here brought the
+        // star counter and the in-maze HUD back for the length of the walk. _open = false already stops Update.
         _open = false;
-        GameFlow.IsInShop = false;
         PlayerLock.Freeze(_player, true);
         if (_hud != null) _hud.SetPrompt(null);
 

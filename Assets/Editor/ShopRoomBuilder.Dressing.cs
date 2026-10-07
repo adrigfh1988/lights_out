@@ -482,9 +482,30 @@ public static partial class ShopRoomBuilder
         Shift(frame, new Vector3(0f, 0f, -HalfZ - fb.min.z + 0.02f));
         fb = LocalBounds(frame);
 
-        // Closed leaf, centred in the frame, on a hinge pivot at its edge so ShopRoom can swing it open.
+        // The pack's Door model is frame AND a closed panel fused into one mesh, so it can't open - and it hides the
+        // separate leaf below. It is only a measuring stick for where the leaf goes; the wall module's door opening
+        // already has its own frame, so it is removed again.
+        Object.DestroyImmediate(frame);
+
+        // Closed leaf, centred in the opening, on a hinge pivot at its edge so ShopRoom can swing it open.
         GameObject leaf = PlaceCentred(g, "Architecture/WoodDoor01", new Vector3(fb.center.x, fb.min.y + 0.5f * 1.93f * ArchScale, fb.center.z), scaleMul: ArchScale);
-        return leaf != null ? ShopRoom.CreateDoorHinge(_room, leaf.transform) : null;
+        if (leaf == null) return null;
+        Transform hinge = ShopRoom.CreateDoorHinge(_room, leaf.transform);
+        MakeMovable(hinge);
+        return hinge;
+    }
+
+    /// <summary>
+    /// Clears every static flag under root. A static leaf is merged into a combined mesh by static batching when
+    /// the scene loads, after which turning its hinge moves nothing on screen - the door would never open.
+    /// </summary>
+    internal static void MakeMovable(Transform root)
+    {
+        if (root == null) return;
+        foreach (Transform t in root.GetComponentsInChildren<Transform>(true))
+        {
+            GameObjectUtility.SetStaticEditorFlags(t.gameObject, 0);
+        }
     }
 
     private static GameObject[] BuildCounter(Transform root)

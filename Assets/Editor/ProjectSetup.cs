@@ -108,6 +108,22 @@ public static class ProjectSetup
         },
         new Piece
         {
+            Name = "Shop door hinge",
+            FixMenu = "Build Missing Pieces (adds the hinge, clears the leaf's Static flag)",
+            Problem = () =>
+            {
+                ShopRoom shop = Object.FindAnyObjectByType<ShopRoom>(FindObjectsInactive.Include);
+                if (shop == null) return null; // reported by "Shop room"
+                SerializedProperty hinge = new SerializedObject(shop).FindProperty("doorHinge");
+                Transform pivot = hinge != null ? hinge.objectReferenceValue as Transform : null;
+                if (pivot == null) return FindShopDoorLeaf(shop) != null ? "no doorHinge wired" : null;
+                if (IsStaticAnywhere(pivot)) return "the door leaf is Static - static batching freezes it shut";
+                return FindFusedDoorModel(shop) != null ? "the pack's fused Door model (frame + closed panel) hides the swinging leaf" : null;
+            },
+            Build = FixShopDoorHinge
+        },
+        new Piece
+        {
             Name = "Hunter body (Adam)",
             FixMenu = "Build > Hunter Body",
             Problem = () =>
@@ -212,6 +228,78 @@ public static class ProjectSetup
             if (it.objectReferenceValue == null) empty.Add(it.name);
         }
         return empty;
+    }
+
+    /// <summary>The shop's closed door leaf (ShopRoom/Door/WoodDoor01...), whether or not it already sits under a hinge.</summary>
+    private static Transform FindShopDoorLeaf(ShopRoom shop)
+    {
+        Transform door = shop.transform.Find("Door");
+        if (door == null) return null;
+        foreach (Transform t in door.GetComponentsInChildren<Transform>(true))
+        {
+            if (t.name.StartsWith("WoodDoor01")) return t;
+        }
+        return null;
+    }
+
+    private static bool IsStaticAnywhere(Transform root)
+    {
+        foreach (Transform t in root.GetComponentsInChildren<Transform>(true))
+        {
+            if (GameObjectUtility.GetStaticEditorFlags(t.gameObject) != 0) return true;
+        }
+        return false;
+    }
+
+    /// <summary>Gives an already-built shop room what Build &gt; Shop Room now makes: a hinge pivot on the leaf, wired into ShopRoom, nothing under it Static.</summary>
+    private static void FixShopDoorHinge()
+    {
+        ShopRoom shop = Object.FindAnyObjectByType<ShopRoom>(FindObjectsInactive.Include);
+        if (shop == null) return;
+
+        SerializedObject so = new SerializedObject(shop);
+        SerializedProperty hingeProp = so.FindProperty("doorHinge");
+        Transform hinge = hingeProp.objectReferenceValue as Transform;
+
+        if (hinge == null)
+        {
+            Transform leaf = FindShopDoorLeaf(shop);
+            if (leaf == null) return;
+
+            hinge = leaf.parent != null && leaf.parent.name == "DoorHinge" ? leaf.parent : null;
+            if (hinge == null)
+            {
+                Undo.RegisterFullObjectHierarchyUndo(leaf.parent.gameObject, "Hinge Shop Door");
+                hinge = ShopRoom.CreateDoorHinge(shop.transform, leaf);
+                Undo.RegisterCreatedObjectUndo(hinge.gameObject, "Hinge Shop Door");
+            }
+
+            hingeProp.objectReferenceValue = hinge;
+            so.ApplyModifiedProperties();
+        }
+
+        foreach (Transform t in hinge.GetComponentsInChildren<Transform>(true)) Undo.RecordObject(t.gameObject, "Hinge Shop Door");
+        ShopRoomBuilder.MakeMovable(hinge);
+
+        GameObject fused = FindFusedDoorModel(shop);
+        if (fused != null) Undo.DestroyObjectImmediate(fused);
+
+        EditorSceneManager.MarkSceneDirty(shop.gameObject.scene);
+    }
+
+    /// <summary>
+    /// The pack's Architecture/Door model under ShopRoom/Door: one mesh with the frame and a closed panel fused
+    /// together. Older Build &gt; Shop Room runs placed it over the leaf, so the leaf swung open unseen behind it.
+    /// </summary>
+    private static GameObject FindFusedDoorModel(ShopRoom shop)
+    {
+        Transform group = shop.transform.Find("Door");
+        if (group == null) return null;
+        foreach (Transform child in group)
+        {
+            if (child.name == "Door" && child.GetComponent<Renderer>() != null) return child.gameObject;
+        }
+        return null;
     }
 
     private static string PhraseBookProblem()
