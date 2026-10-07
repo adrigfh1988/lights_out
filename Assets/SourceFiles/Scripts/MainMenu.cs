@@ -75,6 +75,19 @@ public class MainMenu : MonoBehaviour
         if (GameFlow.SkipMenuOnLoad)
         {
             GameFlow.SkipMenuOnLoad = false;
+
+            // F83: CONTINUE on a save taken in the shop. Same housekeeping as StartGame, but it is not a run:
+            // IsRunActive stays false and the player lands in the shop.
+            if (GameFlow.ResumeInShop)
+            {
+                GameFlow.ResumeInShop = false;
+                CloseMenus();
+                GameOutcome outcome = FindAnyObjectByType<GameOutcome>();
+                if (outcome != null) outcome.EnterShopDirectly();
+                else GameFlow.NextFloor();
+                return;
+            }
+
             StartGame();
         }
     }
@@ -113,6 +126,15 @@ public class MainMenu : MonoBehaviour
 
     private void StartGame()
     {
+        CloseMenus();
+
+        GameFlow.RunStartTime = Time.time;
+        GameFlow.IsRunActive = true;
+    }
+
+    /// <summary>The part of starting that both a run and a shop resume need: hide the screens, hand the player back, undo Awake's zeroed clock.</summary>
+    private void CloseMenus()
+    {
         TouchInput.Poll();
 
         // F76 T8: a fullscreen request needs a user gesture on the web, and this tap is one. iPhone
@@ -129,9 +151,6 @@ public class MainMenu : MonoBehaviour
         PlayerLock.Freeze(_player, false);
         PlayerLock.SetCursorFree(false);
         Time.timeScale = 1f;
-
-        GameFlow.RunStartTime = Time.time;
-        GameFlow.IsRunActive = true;
     }
 
     /// <summary>F76 T6: shown instead of the keyboard/mouse control line while touch is active or the
@@ -168,15 +187,24 @@ public class MainMenu : MonoBehaviour
         TextMeshProUGUI sub = RuntimeUi.CreateText(_titleScreen.transform, "Tagline", tagline, 38f, new Color(0.75f, 0.75f, 0.78f));
         RuntimeUi.Place(sub.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -290f), new Vector2(1200f, 60f));
 
+        // F83: with a saved run a plain CONTINUE sits on top of the usual stack; without one the title screen is unchanged.
+        if (SaveSystem.TryLoad(out SaveData save))
+        {
+            Button continueButton = RuntimeUi.CreateButton(_titleScreen.transform, "CONTINUE",
+                new Vector2(0f, 410f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
+            continueButton.onClick.AddListener(ContinueSavedRun);
+            _savedFloor = save.floor;
+        }
+
         Button start = RuntimeUi.CreateButton(_titleScreen.transform, "START GAME",
             new Vector2(0f, 300f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
-        start.onClick.AddListener(ShowRules);
+        start.onClick.AddListener(() => ConfirmThenStart(ShowRules));
 
         // F48: builds one floor out of the Maze Modular Puzzle Kit instead of the FloorThemes gallery.
         // A test button - it skips the rules screen and drops straight into the run.
         Button startNewMaze = RuntimeUi.CreateButton(_titleScreen.transform, "START NEW MAZE",
             new Vector2(0f, 190f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
-        startNewMaze.onClick.AddListener(StartKitMaze);
+        startNewMaze.onClick.AddListener(() => ConfirmThenStart(StartKitMaze));
 
         Button exit = RuntimeUi.CreateButton(_titleScreen.transform, "EXIT",
             new Vector2(0f, 80f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
@@ -187,6 +215,87 @@ public class MainMenu : MonoBehaviour
     private void StartKitMaze()
     {
         GameFlow.StartKitMaze();
+    }
+
+    // ---------------------------------------------------------------- F83: saved run
+
+    private GameObject _confirmPanel;
+    private int _savedFloor;
+
+    /// <summary>CONTINUE: restore the save and reload through the normal SkipMenuOnLoad path (StartGame, or the shop for a shop save).</summary>
+    private void ContinueSavedRun()
+    {
+        // The reload throws the fullscreen gesture away, so ask for it now, on the tap itself (same as StartGame).
+        TouchInput.Poll();
+        if (TouchInput.Active)
+        {
+            try { Screen.fullScreen = true; } catch { /* best effort only */ }
+        }
+
+        if (!SaveSystem.ResumeCampaign()) RefreshTitleScreen();
+    }
+
+    /// <summary>START GAME / START NEW MAZE: with a saved run in the way, ask before throwing it away.</summary>
+    private void ConfirmThenStart(System.Action begin)
+    {
+        if (!SaveSystem.HasSave)
+        {
+            begin();
+            return;
+        }
+
+        if (_confirmPanel == null) BuildConfirmPanel();
+        _confirmText.text = $"Your saved run (floor {_savedFloor}) will be lost.";
+        _confirmAction = begin;
+        _confirmPanel.SetActive(true);
+        _confirmPanel.transform.SetAsLastSibling();
+    }
+
+    private TextMeshProUGUI _confirmText;
+    private System.Action _confirmAction;
+
+    private void BuildConfirmPanel()
+    {
+        _confirmPanel = RuntimeUi.CreatePanel(_titleScreen.transform, "ConfirmStartOver", new Color(0.02f, 0.02f, 0.03f, 0.97f));
+
+        TextMeshProUGUI heading = RuntimeUi.CreateText(_confirmPanel.transform, "Heading", "START OVER?", 76f, accent);
+        heading.fontStyle = FontStyles.Bold;
+        heading.characterSpacing = 8f;
+        RuntimeUi.Place(heading.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -300f), new Vector2(1400f, 100f));
+
+        _confirmText = RuntimeUi.CreateText(_confirmPanel.transform, "Body", "", 40f, new Color(0.88f, 0.88f, 0.9f));
+        RuntimeUi.Place(_confirmText.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -420f), new Vector2(1400f, 80f));
+
+        Button startOver = RuntimeUi.CreateButton(_confirmPanel.transform, "START OVER",
+            new Vector2(0f, 400f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
+        startOver.onClick.AddListener(() =>
+        {
+            SaveSystem.Delete();
+            _confirmPanel.SetActive(false);
+            System.Action action = _confirmAction;
+            _confirmAction = null;
+            action?.Invoke();
+        });
+
+        Button back = RuntimeUi.CreateButton(_confirmPanel.transform, "BACK",
+            new Vector2(0f, 290f), new Vector2(420f, 86f), 40f, buttonIdle, buttonHover, Color.white);
+        back.onClick.AddListener(() => _confirmPanel.SetActive(false));
+
+        _confirmPanel.SetActive(false);
+    }
+
+    /// <summary>The save turned out unusable when CONTINUE was pressed (TryLoad already deleted it): rebuild the title screen without CONTINUE.</summary>
+    private void RefreshTitleScreen()
+    {
+        bool wasActive = _titleScreen != null && _titleScreen.activeSelf;
+        if (_titleScreen != null) Destroy(_titleScreen);
+        _confirmPanel = null;
+
+        Canvas canvas = RuntimeUi.ResolveCanvas();
+        BuildTitleScreen(canvas.transform);
+        _titleScreen.SetActive(wasActive);
+        // Sits under the rules screen in sibling order, as it did when first built.
+        if (_rulesScreen != null) _titleScreen.transform.SetSiblingIndex(_rulesScreen.transform.GetSiblingIndex());
     }
 
     private void BuildRulesScreen(Transform canvas)

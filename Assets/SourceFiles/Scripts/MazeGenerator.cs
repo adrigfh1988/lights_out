@@ -115,19 +115,19 @@ public class MazeGenerator : MonoBehaviour
     [SerializeField] private float faultyLampChance = 0.25f;
 
     [Header("Themes")]
-    [Tooltip("Scene gallery built by LIGHTS OUT > Build Floor Themes. Found automatically; assign only to override.")]
+    [Tooltip("Scene gallery built by LIGHTS OUT > Build > Floor Themes. Found automatically; assign only to override.")]
     [SerializeField] private FloorThemeSet themeSet;
     [Tooltip("Combine the static themed geometry (walls, pillars, floor, ceiling) after the navmesh bake. Off until profiled.")]
     [SerializeField] private bool staticBatchThemedGeometry = false;
 
     [Header("Kit maze (F48)")]
-    [Tooltip("Scene object built by LIGHTS OUT > Build Kit Maze Theme. Found automatically; assign only to override.")]
+    [Tooltip("Scene object built by LIGHTS OUT > Build > Kit Maze Theme. Found automatically; assign only to override.")]
     [SerializeField] private KitMazeTheme kitTheme;
     [Tooltip("Corridor pitch when GameFlow.UseKitMaze is set. Whole metres so 3M/2M/1M pieces fill a wall exactly.")]
     [SerializeField] private int kitCellSize = 5;
 
     [Header("Interactables (F72)")]
-    [Tooltip("Scene gallery built by LIGHTS OUT > Build Interactables. Found automatically; assign only to override.")]
+    [Tooltip("Scene gallery built by LIGHTS OUT > Build > Interactables. Found automatically; assign only to override.")]
     [SerializeField] private InteractableKit interactableKit;
 
     [Header("Key Hunt (F77)")]
@@ -433,7 +433,7 @@ public class MazeGenerator : MonoBehaviour
     /// <summary>
     /// Picks the FloorThemes gallery row this maze clones, or leaves _theme null to fall back to the
     /// primitive geometry the game shipped with before theming existed. The Editor cannot run the
-    /// LIGHTS OUT &gt; Build Floor Themes menu item on this implementer's behalf (it does not hold the
+    /// LIGHTS OUT &gt; Build &gt; Floor Themes menu item on this implementer's behalf (it does not hold the
     /// project lock), so until the user runs it and saves the scene, every maze uses this fallback.
     /// </summary>
     private void ResolveTheme()
@@ -444,7 +444,7 @@ public class MazeGenerator : MonoBehaviour
         if (themeSet == null) themeSet = FindAnyObjectByType<FloorThemeSet>(FindObjectsInactive.Include);
         if (themeSet == null)
         {
-            Debug.LogError("MazeGenerator: no FloorThemes gallery in the scene, building the plain maze. Run LIGHTS OUT > Build Floor Themes in the Editor, then save the scene.", this);
+            Debug.LogError("MazeGenerator: no FloorThemes gallery in the scene, building the plain maze. Run LIGHTS OUT > Build > Floor Themes in the Editor, then save the scene.", this);
             return;
         }
 
@@ -473,7 +473,7 @@ public class MazeGenerator : MonoBehaviour
         if (kitTheme == null) kitTheme = FindAnyObjectByType<KitMazeTheme>(FindObjectsInactive.Include);
         if (kitTheme == null || !kitTheme.IsComplete)
         {
-            Debug.LogError("MazeGenerator: GameFlow.UseKitMaze is set but there is no complete KitMazeTheme in the scene. Run LIGHTS OUT > Build Kit Maze Theme, then save the scene. Building the normal maze.", this);
+            Debug.LogError("MazeGenerator: GameFlow.UseKitMaze is set but there is no complete KitMazeTheme in the scene. Run LIGHTS OUT > Build > Kit Maze Theme, then save the scene. Building the normal maze.", this);
             return;
         }
 
@@ -2807,7 +2807,7 @@ public class MazeGenerator : MonoBehaviour
         if (interactableKit == null) interactableKit = FindAnyObjectByType<InteractableKit>(FindObjectsInactive.Include);
         if (interactableKit == null || !interactableKit.HasDoorsAndButtons)
         {
-            Debug.LogError("MazeGenerator: no InteractableKit (doors/buttons/battery cell) in the scene - skipping doors, buttons and vaults. Run LIGHTS OUT > Build Interactables in the Editor, then save the scene.", this);
+            Debug.LogError("MazeGenerator: no InteractableKit (doors/buttons/battery cell) in the scene - skipping doors, buttons and vaults. Run LIGHTS OUT > Build > Interactables in the Editor, then save the scene.", this);
             return;
         }
 
@@ -3424,7 +3424,7 @@ public class MazeGenerator : MonoBehaviour
         if (interactableKit == null) interactableKit = FindAnyObjectByType<InteractableKit>(FindObjectsInactive.Include);
         if (interactableKit == null || !interactableKit.HasFuseBox)
         {
-            Debug.LogError("MazeGenerator: no InteractableKit fuse box in the scene - skipping this Blackout floor's fuses. Run LIGHTS OUT > Build Interactables in the Editor, then save the scene.", this);
+            Debug.LogError("MazeGenerator: no InteractableKit fuse box in the scene - skipping this Blackout floor's fuses. Run LIGHTS OUT > Build > Interactables in the Editor, then save the scene.", this);
             return;
         }
 
@@ -3622,7 +3622,7 @@ public class MazeGenerator : MonoBehaviour
         if (interactableKit == null) interactableKit = FindAnyObjectByType<InteractableKit>(FindObjectsInactive.Include);
         if (interactableKit == null || !interactableKit.HasKey)
         {
-            Debug.LogError("MazeGenerator: no InteractableKit key in the scene - skipping this Key Hunt floor's keys (the hatch will not be locked). Run LIGHTS OUT > Build Interactables in the Editor, then save the scene.", this);
+            Debug.LogError("MazeGenerator: no InteractableKit key in the scene - skipping this Key Hunt floor's keys (the hatch will not be locked). Run LIGHTS OUT > Build > Interactables in the Editor, then save the scene.", this);
             return;
         }
 
@@ -3743,7 +3743,7 @@ public class MazeGenerator : MonoBehaviour
         if (interactableKit == null) interactableKit = FindAnyObjectByType<InteractableKit>(FindObjectsInactive.Include);
         if (interactableKit == null || !interactableKit.HasThrowables)
         {
-            Debug.LogError("MazeGenerator: no InteractableKit throwables in the scene - skipping bottles/cans. Run LIGHTS OUT > Build Interactables in the Editor, then save the scene.", this);
+            Debug.LogError("MazeGenerator: no InteractableKit throwables in the scene - skipping bottles/cans. Run LIGHTS OUT > Build > Interactables in the Editor, then save the scene.", this);
             return;
         }
 
@@ -3793,7 +3793,7 @@ public class MazeGenerator : MonoBehaviour
         if (interactableKit == null) interactableKit = FindAnyObjectByType<InteractableKit>(FindObjectsInactive.Include);
         if (interactableKit == null || !interactableKit.HasNoisySurfaces)
         {
-            Debug.LogError("MazeGenerator: no InteractableKit noisy floor patches in the scene - skipping glass/puddles. Run LIGHTS OUT > Build Interactables in the Editor, then save the scene.", this);
+            Debug.LogError("MazeGenerator: no InteractableKit noisy floor patches in the scene - skipping glass/puddles. Run LIGHTS OUT > Build > Interactables in the Editor, then save the scene.", this);
             return;
         }
 
@@ -3837,7 +3837,7 @@ public class MazeGenerator : MonoBehaviour
         if (interactableKit == null) interactableKit = FindAnyObjectByType<InteractableKit>(FindObjectsInactive.Include);
         if (interactableKit == null || !interactableKit.HasLantern)
         {
-            Debug.LogError("MazeGenerator: no InteractableKit lantern in the scene - skipping it. Run LIGHTS OUT > Build Interactables in the Editor, then save the scene.", this);
+            Debug.LogError("MazeGenerator: no InteractableKit lantern in the scene - skipping it. Run LIGHTS OUT > Build > Interactables in the Editor, then save the scene.", this);
             return;
         }
 
@@ -3880,7 +3880,7 @@ public class MazeGenerator : MonoBehaviour
         if (interactableKit == null) interactableKit = FindAnyObjectByType<InteractableKit>(FindObjectsInactive.Include);
         if (interactableKit == null || !interactableKit.HasLoreNote)
         {
-            Debug.LogError("MazeGenerator: no InteractableKit lore note in the scene - skipping this floor's notes. Run LIGHTS OUT > Build Interactables in the Editor, then save the scene.", this);
+            Debug.LogError("MazeGenerator: no InteractableKit lore note in the scene - skipping this floor's notes. Run LIGHTS OUT > Build > Interactables in the Editor, then save the scene.", this);
             return;
         }
 
@@ -3937,7 +3937,7 @@ public class MazeGenerator : MonoBehaviour
         if (interactableKit == null) interactableKit = FindAnyObjectByType<InteractableKit>(FindObjectsInactive.Include);
         if (interactableKit == null || !interactableKit.HasThemeInteractables)
         {
-            Debug.LogError("MazeGenerator: no InteractableKit theme interactables in the scene - skipping this floor's. Run LIGHTS OUT > Build Interactables in the Editor, then save the scene.", this);
+            Debug.LogError("MazeGenerator: no InteractableKit theme interactables in the scene - skipping this floor's. Run LIGHTS OUT > Build > Interactables in the Editor, then save the scene.", this);
             return;
         }
 
@@ -4306,7 +4306,7 @@ public class MazeGenerator : MonoBehaviour
         if (interactableKit == null) interactableKit = FindAnyObjectByType<InteractableKit>(FindObjectsInactive.Include);
         if (interactableKit == null || !interactableKit.HasStalker)
         {
-            Debug.LogError("MazeGenerator: no InteractableKit (stalker) in the scene - skipping the stalker this run. Run LIGHTS OUT > Build Interactables in the Editor, then save the scene.", this);
+            Debug.LogError("MazeGenerator: no InteractableKit (stalker) in the scene - skipping the stalker this run. Run LIGHTS OUT > Build > Interactables in the Editor, then save the scene.", this);
             return;
         }
 
@@ -4590,7 +4590,7 @@ public class MazeGenerator : MonoBehaviour
         phantoms.Configure(this, player, camera, aiFollower, director, flashlight, stealth, outcome, dread, phantomWallMat, FindStarMaterial(), FindPlayerFootsteps(), _profile);
 
         // Tier 4: the room between floors. Unlike everything else here it is authored in the scene
-        // (LIGHTS OUT > Build Shop Room generates it once), so it can be inspected and edited in the
+        // (LIGHTS OUT > Build > Shop Room generates it once), so it can be inspected and edited in the
         // Editor. Only its panel is runtime UI.
         ShopMenu shopMenu = FindAnyObjectByType<ShopMenu>();
         if (shopMenu == null) shopMenu = gameObject.AddComponent<ShopMenu>();
@@ -4599,12 +4599,12 @@ public class MazeGenerator : MonoBehaviour
         ShopRoom shop = FindAnyObjectByType<ShopRoom>();
         if (shop != null && !shop.IsComplete)
         {
-            Debug.LogError("MazeGenerator: the ShopRoom in the scene has no Arrival Point or zones. Run LIGHTS OUT > Build Shop Room in the Editor.", shop);
+            Debug.LogError("MazeGenerator: the ShopRoom in the scene has no Arrival Point or zones. Run LIGHTS OUT > Build > Shop Room in the Editor.", shop);
             shop = null;
         }
         else if (shop == null)
         {
-            Debug.LogError("MazeGenerator: there is no ShopRoom in the scene, so clearing floors 1-4 will end the run as a win. Run LIGHTS OUT > Build Shop Room in the Editor, then save the scene.", this);
+            Debug.LogError("MazeGenerator: there is no ShopRoom in the scene, so clearing floors 1-4 will end the run as a win. Run LIGHTS OUT > Build > Shop Room in the Editor, then save the scene.", this);
         }
         if (shop != null) shop.Configure(player, hud, shopMenu);
 

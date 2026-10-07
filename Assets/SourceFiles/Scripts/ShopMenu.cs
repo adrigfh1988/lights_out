@@ -290,6 +290,7 @@ public class ShopMenu : MonoBehaviour
                 return; // cosmetics go through TrySelectCosmetic
         }
 
+        SaveSystem.WriteCheckpoint(GameFlow.CurrentFloor, true); // F83: purchases are kept (AdvanceFloor has not run yet)
         PlayTick();
         Refresh();
     }
@@ -326,6 +327,7 @@ public class ShopMenu : MonoBehaviour
             if (tension != null) tension.SetCalmColor(tint);
         }
 
+        SaveSystem.WriteCheckpoint(GameFlow.CurrentFloor, true); // F83
         PlayTick();
         Refresh();
     }

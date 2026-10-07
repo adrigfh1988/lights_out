@@ -244,6 +244,8 @@ public class GameOutcome : MonoBehaviour
 
         Payout payout = PlayerWallet.ComputeFloorClear(GameFlow.CurrentFloor, _collected, secondsLeft);
         PlayerWallet.Deposit(payout);
+        // F83: shop-arrival checkpoint, with the payout banked. Resumes straight into the shop.
+        SaveSystem.WriteCheckpoint(GameFlow.CurrentFloor, true);
 
         Transform ledger = blackout != null ? BuildLedger(blackout.transform, payout) : null;
         _showingLedger = true; // Update frees the cursor while this is true
@@ -262,6 +264,55 @@ public class GameOutcome : MonoBehaviour
         if (blackout != null)
         {
             yield return Fade(blackout, 1f, 0f, 0.5f, ledger);
+            Destroy(blackout.gameObject);
+        }
+    }
+
+    /// <summary>
+    /// F83: CONTINUE on a save taken in the shop. The tail of FloorClearSequence without the ledger or the
+    /// payout (already banked in the save): silence the hunt, torch off, teleport in, open the room, fade up.
+    /// Called by MainMenu.Start with GameFlow.IsRunActive still false. No shop in the scene = start the next floor.
+    /// </summary>
+    public void EnterShopDirectly()
+    {
+        if (_shop == null)
+        {
+            GameFlow.NextFloor();
+            return;
+        }
+
+        StartCoroutine(EnterShopRoutine());
+    }
+
+    private IEnumerator EnterShopRoutine()
+    {
+        IsEnding = true;
+        // The maze behind the shop was rebuilt from a fresh seed and just re-rolled this floor's pair; put the played one back.
+        SaveSystem.ReapplyRolledObjectives();
+
+        EndTheHunt();
+        if (_flashlight != null) { _flashlight.SetOn(false); _flashlight.InputEnabled = false; }
+        PlayerLock.Freeze(_player, true);
+
+        // Created before the first yield, so the half-built maze is never seen.
+        Canvas canvas = RuntimeUi.ResolveCanvas();
+        Image blackout = null;
+        if (canvas != null)
+        {
+            blackout = RuntimeUi.CreatePanel(canvas.transform, "Blackout", Color.black).GetComponent<Image>();
+            blackout.transform.SetAsLastSibling();
+        }
+
+        _shop.ArrivePlayer(_player);
+        GameFlow.IsInShop = true;
+        IsEnding = false;
+        _shop.Open();
+        PlayerLock.Freeze(_player, false);
+        PlayerLock.SetCursorFree(false);
+
+        if (blackout != null)
+        {
+            yield return Fade(blackout, 1f, 0f, 0.5f);
             Destroy(blackout.gameObject);
         }
     }
@@ -355,6 +406,8 @@ public class GameOutcome : MonoBehaviour
         float secondsLeft = _escape != null ? _escape.TimeLeft : 0f;
         _floorPayout = PlayerWallet.ComputeFloorClear(GameFlow.CurrentFloor, _collected, secondsLeft);
         PlayerWallet.Deposit(_floorPayout);
+        // F83: the campaign is over. Guarded on the final floor so the no-shop fallback (a plain Win on floors 1-4) keeps its save.
+        if (GameFlow.CurrentFloor >= FloorProfile.FinalFloor) SaveSystem.Delete();
 
         EndTheHunt();
         if (_escape != null) _escape.Stop();

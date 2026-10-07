@@ -40,6 +40,10 @@ public static class GameFlow
     /// same pair. Campaign-scoped: reset here and in ResetStatics.</summary>
     public static int[] RolledObjectives = new int[FloorProfile.FinalFloor + 1];
 
+    /// <summary>F83: set by SaveSystem.ResumeCampaign for a save taken in the shop; consumed by MainMenu.Start (together with
+    /// SkipMenuOnLoad), which enters the shop via GameOutcome.EnterShopDirectly instead of starting a run. Reset here, in ResetStatics and in ReturnToMenu.</summary>
+    public static bool ResumeInShop;
+
     public static void Restart(bool sameMaze, int currentSeed)
     {
         SkipMenuOnLoad = true;
@@ -59,6 +63,8 @@ public static class GameFlow
     {
         CurrentFloor = Mathf.Min(CurrentFloor + 1, FloorProfile.FinalFloor);
         PlayerInventory.AdvanceFloor();
+        // F83: floor-start checkpoint, after AdvanceFloor so ActiveModifiers are the perks for the floor being started.
+        SaveSystem.WriteCheckpoint(CurrentFloor, false);
         Restart(false, 0);
     }
 
@@ -68,6 +74,8 @@ public static class GameFlow
         CurrentFloor = 1;
         PendingSeed = 0;
         UseKitMaze = false;
+        ResumeInShop = false;
+        // F83: deliberately does NOT delete the save - that is what puts CONTINUE on the title screen.
         PlayerWallet.ResetCampaign();
         PlayerInventory.ResetCampaign();
         DreadDirector.ResetCampaign();
@@ -112,6 +120,7 @@ public static class GameFlow
         CurrentFloor = 1;
         IsInShop = false;
         UseKitMaze = false;
+        ResumeInShop = false;
         System.Array.Clear(RolledObjectives, 0, RolledObjectives.Length);
     }
 }

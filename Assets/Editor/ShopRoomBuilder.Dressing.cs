@@ -470,19 +470,21 @@ public static partial class ShopRoomBuilder
 
     // ---------------------------------------------------------------- door and counter
 
-    private static void BuildDoor(Transform root)
+    /// <summary>Frame and leaf; returns the leaf's hinge pivot (ShopRoom.doorHinge), or null if the pack is missing.</summary>
+    private static Transform BuildDoor(Transform root)
     {
         Transform g = Group(root, "Door");
 
         // The frame sits flush with the inner face of the south wall, in the door module's opening.
         GameObject frame = PlaceOnFloor(g, "Architecture/Door", new Vector3(0f, 0f, -HalfZ), scaleMul: ArchScale);
-        if (frame == null) return;
+        if (frame == null) return null;
         Bounds fb = LocalBounds(frame);
         Shift(frame, new Vector3(0f, 0f, -HalfZ - fb.min.z + 0.02f));
         fb = LocalBounds(frame);
 
-        // Closed leaf, centred in the frame.
-        PlaceCentred(g, "Architecture/WoodDoor01", new Vector3(fb.center.x, fb.min.y + 0.5f * 1.93f * ArchScale, fb.center.z), scaleMul: ArchScale);
+        // Closed leaf, centred in the frame, on a hinge pivot at its edge so ShopRoom can swing it open.
+        GameObject leaf = PlaceCentred(g, "Architecture/WoodDoor01", new Vector3(fb.center.x, fb.min.y + 0.5f * 1.93f * ArchScale, fb.center.z), scaleMul: ArchScale);
+        return leaf != null ? ShopRoom.CreateDoorHinge(_room, leaf.transform) : null;
     }
 
     private static GameObject[] BuildCounter(Transform root)

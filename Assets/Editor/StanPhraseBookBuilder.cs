@@ -4,7 +4,7 @@ using UnityEditor.SceneManagement;
 using UnityEngine;
 
 /// <summary>
-/// LIGHTS OUT &gt; Build Phrase Books (F82). Creates Assets/SourceFiles/Data/StanPhrases.asset and
+/// LIGHTS OUT &gt; Build &gt; Phrase Books (F82). Creates Assets/SourceFiles/Data/StanPhrases.asset and
 /// HunterPhrases.asset with the default lines if they are missing - never overwrites an existing one, so
 /// the user's edits win - then assigns Stan's to the InteractableKit's Stalker template and puts a
 /// HunterVoice (with its book) on the scene's hunter, both through SerializedObject so the tunables are
@@ -18,7 +18,7 @@ public static class StanPhraseBookBuilder
     public const string AssetPath = AssetFolder + "/StanPhrases.asset";
     public const string HunterAssetPath = AssetFolder + "/HunterPhrases.asset";
 
-    [MenuItem("LIGHTS OUT/Build Phrase Books (Stan + Hunter)")]
+    [MenuItem("LIGHTS OUT/Build/Phrase Books (Stan + Hunter)", priority = 103)]
     public static void Build()
     {
         bool stanCreated = LoadOrCreate(AssetPath, out StalkerPhraseBook stanBook, b => b.FillDefaults());
@@ -46,7 +46,7 @@ public static class StanPhraseBookBuilder
         }
         else
         {
-            report += "No Stalker template in the open scene - run LIGHTS OUT > Build Interactables, then this again.\n";
+            report += "No Stalker template in the open scene - run LIGHTS OUT > Build > Interactables, then this again.\n";
         }
 
         // Hunter: the scene's AIFollower gets a HunterVoice (added if missing) with the book assigned.

@@ -5,7 +5,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 
 /// <summary>
-/// LIGHTS OUT &gt; Build Kit Maze Theme. Creates the KitMazeTheme scene object F48's "START NEW MAZE"
+/// LIGHTS OUT &gt; Build &gt; Kit Maze Theme. Creates the KitMazeTheme scene object F48's "START NEW MAZE"
 /// path reads: seven prefab *asset* references loaded by path from Assets/Maze/Prefabs (the Maze
 /// Modular Puzzle Kit), plus a showcase row so the pieces can be inspected in the Scene view. Nothing
 /// here runs in a build; at Play time MazeGenerator.ResolveKitTheme just finds what this made and
@@ -18,7 +18,7 @@ public static class KitMazeThemeBuilder
     private static readonly Vector3 ThemeOrigin = new Vector3(-70f, 5f, 10f);
     private const float ShowcaseSpacing = 4f;
 
-    [MenuItem("LIGHTS OUT/Build Kit Maze Theme")]
+    [MenuItem("LIGHTS OUT/Build/Kit Maze Theme", priority = 101)]
     public static void Build()
     {
         Scene scene = SceneManager.GetActiveScene();

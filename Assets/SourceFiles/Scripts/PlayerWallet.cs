@@ -21,8 +21,9 @@ public sealed class Payout
 }
 
 /// <summary>
-/// The campaign's currency. Statics, reset at the main menu and at SubsystemRegistration - nothing is
-/// saved to disk, and a run never outlives Play mode. Anti-farm bookkeeping (decision 4) lives here:
+/// The campaign's currency. Statics, reset at the main menu and at SubsystemRegistration. F83:
+/// SaveSystem snapshots and restores it (CaptureTo/RestoreFrom) at the floor checkpoints; a run's live
+/// earnings are only kept once a checkpoint is written. Anti-farm bookkeeping (decision 4) lives here:
 /// a same-seed retry re-spawns the same maze, so both maze shards and consolation are capped per floor.
 /// </summary>
 public static class PlayerWallet
@@ -156,6 +157,31 @@ public static class PlayerWallet
         ShardsFoundThisAttempt = 0;
         Array.Clear(MazeShardsEarnedOnFloor, 0, MazeShardsEarnedOnFloor.Length);
         Array.Clear(ConsolationPaidOnFloor, 0, ConsolationPaidOnFloor.Length);
+    }
+
+    /// <summary>F83: writes the wallet and the anti-farm counters into a save.</summary>
+    public static void CaptureTo(SaveData data)
+    {
+        data.shards = Shards;
+        data.totalEarned = TotalEarned;
+        data.mazeShardsEarnedOnFloor = (int[])MazeShardsEarnedOnFloor.Clone();
+        data.consolationPaidOnFloor = (int[])ConsolationPaidOnFloor.Clone();
+    }
+
+    /// <summary>F83: replaces the wallet from a save. Tolerates null / wrong-length arrays (copies the shorter length).</summary>
+    public static void RestoreFrom(SaveData data)
+    {
+        ResetCampaign();
+        Shards = Mathf.Max(0, data.shards);
+        TotalEarned = Mathf.Max(0, data.totalEarned);
+        CopyInto(data.mazeShardsEarnedOnFloor, MazeShardsEarnedOnFloor);
+        CopyInto(data.consolationPaidOnFloor, ConsolationPaidOnFloor);
+    }
+
+    private static void CopyInto(int[] source, int[] target)
+    {
+        if (source == null) return;
+        Array.Copy(source, target, Mathf.Min(source.Length, target.Length));
     }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

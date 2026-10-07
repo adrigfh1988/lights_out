@@ -114,9 +114,9 @@ public class AIFollower : MonoBehaviour
     [Header("Animation")]
     [SerializeField] private Animator animator;
     [SerializeField] private float animationBlendRate = 6f;
-    [Tooltip("Yaw (degrees) the visible mesh faces relative to its Animator node's +Z. 0 for the Timmy robot. A Generic rig whose model faces sideways in its file (ZombieSmooth.fbx faces +X) needs this so the sight cone, the turn-to-face and the eyes all use the face, not the node axis. Written by LIGHTS OUT > Build Hunter Body.")]
+    [Tooltip("Yaw (degrees) the visible mesh faces relative to its Animator node's +Z. 0 for the Timmy robot. A Generic rig whose model faces sideways in its file (ZombieSmooth.fbx faces +X) needs this so the sight cone, the turn-to-face and the eyes all use the face, not the node axis. Written by LIGHTS OUT > Build > Hunter Body.")]
     [SerializeField] private float modelFacingYaw = 0f;
-    [Tooltip("Set by LIGHTS OUT > Build Hunter Body: true when no 'look' clip resolved. While true, a search dwell keeps spinning the body in place (the only way to show a sweep with no clip); while false, the body stays still and HunterGaze's head sweep (plus the matching CanSeeTarget cone offset) does the work instead.")]
+    [Tooltip("Set by LIGHTS OUT > Build > Hunter Body: true when no 'look' clip resolved. While true, a search dwell keeps spinning the body in place (the only way to show a sweep with no clip); while false, the body stays still and HunterGaze's head sweep (plus the matching CanSeeTarget cone offset) does the work instead.")]
     [SerializeField] private bool bodySweepsDuringSearch = true;
 
     private static readonly int AnimSpeed = Animator.StringToHash("Speed");

@@ -74,7 +74,7 @@ public class StalkerVoice : CreatureVoice
         _book = book;
         if (_book == null)
         {
-            Debug.LogWarning("StalkerVoice: no phrase book assigned on the Stalker template - using the built-in default lines. Run LIGHTS OUT > Build Phrase Books to make an editable one.", this);
+            Debug.LogWarning("StalkerVoice: no phrase book assigned on the Stalker template - using the built-in default lines. Run LIGHTS OUT > Build > Phrase Books to make an editable one.", this);
             _book = StalkerPhraseBook.CreateDefault();
             _bookIsOurs = true;
         }

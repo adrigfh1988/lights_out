@@ -5,7 +5,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 
 /// <summary>
-/// LIGHTS OUT &gt; Build Interactables. Generates the primitive-built templates every door/button/vault
+/// LIGHTS OUT &gt; Build &gt; Interactables. Generates the primitive-built templates every door/button/vault
 /// pickup clones at runtime (F72 decision D11) - materials under Assets/SourceFiles/Materials/Interactables
 /// (never overwritten if present) and a scene gallery (InteractableKit) holding one live instance of
 /// each template, so an artist can inspect and retouch them exactly like FloorThemes. Nothing here runs
@@ -43,7 +43,7 @@ public static class InteractableKitBuilder
     private const string KitSwitchModelPath = "Assets/Maze/Models/Switch.fbx";
     private const float KitSwitchScale = 0.7f;
 
-    [MenuItem("LIGHTS OUT/Build Interactables")]
+    [MenuItem("LIGHTS OUT/Build/Interactables", priority = 102)]
     public static void Build()
     {
         Scene scene = SceneManager.GetActiveScene();
@@ -267,13 +267,13 @@ public static class InteractableKitBuilder
     }
 
     /// <summary>
-    /// LIGHTS OUT &gt; Rebuild Model Templates (Key, Fuse Box, Button). Build() is build-missing-only, so
+    /// LIGHTS OUT &gt; Build &gt; Re-skin Templates &gt; Key, Fuse Box, Button. Build() is build-missing-only, so
     /// swapping a template's model (the Asset Store meshes and the kit lever, 4 Oct 2026) needs its slot
     /// emptied first: this destroys the current KeyPickup, FuseBox and WallButton gallery objects, clears
     /// the three slots and runs Build(), which re-creates just those at the end of the row. Save the
     /// scene afterwards.
     /// </summary>
-    [MenuItem("LIGHTS OUT/Rebuild Model Templates (Key, Fuse Box, Button)")]
+    [MenuItem("LIGHTS OUT/Build/Re-skin Templates/Key, Fuse Box, Button", priority = 150)]
     public static void RebuildModelTemplates()
     {
         InteractableKit kit = Object.FindAnyObjectByType<InteractableKit>(FindObjectsInactive.Include);
@@ -297,13 +297,13 @@ public static class InteractableKitBuilder
     }
 
     /// <summary>
-    /// LIGHTS OUT &gt; Rebuild Alchemist Templates (Bottle, Can, Lantern, Candles, Note). F79: re-skins five
+    /// LIGHTS OUT &gt; Build &gt; Re-skin Templates &gt; Bottle, Can, Lantern, Candles, Note. F79: re-skins five
     /// templates with Alchemist House pack models (and adds six bottle look-alikes). Same pattern as
     /// RebuildModelTemplates - the gallery objects in those slots (and every bottleVariants entry) are
     /// destroyed, the slots cleared and Build() re-creates just those at the end of the row. No dialogs.
     /// Save the scene afterwards.
     /// </summary>
-    [MenuItem("LIGHTS OUT/Rebuild Alchemist Templates (Bottle, Can, Lantern, Candles, Note)")]
+    [MenuItem("LIGHTS OUT/Build/Re-skin Templates/Bottle, Can, Lantern, Candles, Note", priority = 151)]
     public static void RebuildAlchemistTemplates()
     {
         InteractableKit kit = Object.FindAnyObjectByType<InteractableKit>(FindObjectsInactive.Include);

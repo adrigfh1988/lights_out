@@ -12,7 +12,7 @@ using UnityEngine;
 ///
 /// Runs in LateUpdate, after Animator.Update has already written this frame's bone pose - applying the
 /// aim any earlier would just be overwritten. Added to the body instance, and wired to its AIFollower,
-/// by LIGHTS OUT > Build Hunter Body; presentation only, same as the rest of F50 - it never reads or
+/// by LIGHTS OUT > Build > Hunter Body; presentation only, same as the rest of F50 - it never reads or
 /// writes anything perception/capture cares about beyond the read-only getters AIFollower exposes for it.
 /// </summary>
 public class HunterGaze : MonoBehaviour

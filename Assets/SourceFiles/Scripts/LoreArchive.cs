@@ -24,6 +24,21 @@ public static class LoreArchive
         ReadIds.Clear();
     }
 
+    /// <summary>F83: writes the read note ids into a save.</summary>
+    public static void CaptureTo(SaveData data)
+    {
+        data.readNoteIds = new int[ReadIds.Count];
+        ReadIds.CopyTo(data.readNoteIds);
+    }
+
+    /// <summary>F83: replaces the read set from a save (null tolerated).</summary>
+    public static void RestoreFrom(SaveData data)
+    {
+        ReadIds.Clear();
+        if (data.readNoteIds == null) return;
+        foreach (int id in data.readNoteIds) ReadIds.Add(id);
+    }
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStatics() => ResetCampaign();
 }

@@ -8,7 +8,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 
 /// <summary>
-/// LIGHTS OUT &gt; Build Hunter Body (F47, second attempt). Swaps whatever is under Weeping_Angel - the
+/// LIGHTS OUT &gt; Build &gt; Hunter Body (F47, second attempt). Swaps whatever is under Weeping_Angel - the
 /// placeholder Timmy robot, or the missing-prefab zombie from the first attempt - for an instance of
 /// Adam from the Adam Character Pack, used as-is: no importer edits, no material, no rescale (the pack
 /// already ships a correctly rigged, textured, unit-scaled Humanoid).
@@ -33,7 +33,7 @@ public static class HunterBodyBuilder
     private const string ClipFolder = "Assets/SourceFiles/Animation/Hunter";
     private const string AnimationFolder = "Assets/SourceFiles/Animation";
     private const string ControllerPath = AnimationFolder + "/Hunter.controller";
-    private const string BodyChildName = "HunterBody";
+    internal const string BodyChildName = "HunterBody";
     private const string PlayerRobotFileName = "PlayerRobot.prefab";
 
     private const float DefaultWalkSpeed = 1.6f;
@@ -63,7 +63,7 @@ public static class HunterBodyBuilder
     private const float ReachContactNormalizedTime = 0.55f;
     private const float PoseCrossfadeSeconds = 0.25f;
 
-    [MenuItem("LIGHTS OUT/Build Hunter Body")]
+    [MenuItem("LIGHTS OUT/Build/Hunter Body", priority = 105)]
     public static void Build()
     {
         Scene scene = SceneManager.GetActiveScene();
@@ -555,7 +555,7 @@ public static class HunterBodyBuilder
 
     /// <summary>
     /// Hunter.controller is generated data, not authored content: this method deletes and recreates it
-    /// from scratch on every run of LIGHTS OUT &gt; Build Hunter Body, wiring whatever clips resolved this
+    /// from scratch on every run of LIGHTS OUT &gt; Build &gt; Hunter Body, wiring whatever clips resolved this
     /// run into a fixed shape - a Locomotion blend tree (1D on Speed, or 2D on Speed/Turn once a turn clip
     /// exists), one state each for LookAround/Lurk/Stunned when their clip resolved, and a Reach one-shot
     /// from Any State when a reach clip resolved. Unlike Adam's own imported assets, nothing here is meant

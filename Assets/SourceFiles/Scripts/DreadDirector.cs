@@ -146,6 +146,18 @@ public class DreadDirector : MonoBehaviour
         s_ambushSubtitleShown = false;
     }
 
+    /// <summary>F83: writes the once-per-campaign subtitle flag into a save.</summary>
+    public static void CaptureTo(SaveData data)
+    {
+        data.ambushSubtitleShown = s_ambushSubtitleShown;
+    }
+
+    /// <summary>F83: restores the once-per-campaign subtitle flag from a save.</summary>
+    public static void RestoreFrom(SaveData data)
+    {
+        s_ambushSubtitleShown = data.ambushSubtitleShown;
+    }
+
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]
     private static void ResetStatics()
     {

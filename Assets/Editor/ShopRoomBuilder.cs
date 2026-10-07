@@ -5,7 +5,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 
 /// <summary>
-/// LIGHTS OUT > Build Shop Room. Generates the room between floors as ordinary scene objects, once, so
+/// LIGHTS OUT > Build > Shop Room. Generates the room between floors as ordinary scene objects, once, so
 /// it can be inspected and edited in Unity like anything else. Nothing here runs in a build; at Play
 /// time the ShopRoom component just drives what this made.
 ///
@@ -34,7 +34,7 @@ public static partial class ShopRoomBuilder
     private static readonly Color HatchGreen = new Color(0.25f, 1f, 0.7f);
     private static readonly Color Amber = new Color(1f, 0.72f, 0.42f);
 
-    [MenuItem("LIGHTS OUT/Build Shop Room")]
+    [MenuItem("LIGHTS OUT/Build/Shop Room", priority = 104)]
     public static void Build()
     {
         Scene scene = SceneManager.GetActiveScene();
@@ -106,7 +106,7 @@ public static partial class ShopRoomBuilder
         BuildShell(root.transform);
         BuildBackdrop(root.transform, mats.Wall);
         BuildColliders(root.transform);
-        BuildDoor(root.transform);
+        Transform doorHinge = BuildDoor(root.transform);
         GameObject[] counterTables = BuildCounter(root.transform);
         Transform head = BuildSalesman(root.transform, mats);
         DressCounter(Group(root.transform, "CounterTop"), counterTables);
@@ -139,6 +139,7 @@ public static partial class ShopRoomBuilder
         so.FindProperty("headPivot").objectReferenceValue = head;
         so.FindProperty("counterSign").objectReferenceValue = counterSign;
         so.FindProperty("doorSign").objectReferenceValue = doorSign;
+        so.FindProperty("doorHinge").objectReferenceValue = doorHinge;
         so.ApplyModifiedPropertiesWithoutUndo();
 
         Selection.activeGameObject = root;

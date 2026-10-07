@@ -4,12 +4,13 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 
 /// <summary>
-/// LIGHTS OUT &gt; Relight Floor Themes (Darkness Pass). F71: FloorProfile's ambient numbers dropped a lot
+/// The F71 darkness pass, run automatically at the end of LIGHTS OUT &gt; Build &gt; Floor Themes (it used to
+/// be its own menu item, which was easy to forget after a rebuild). F71: FloorProfile's ambient numbers dropped a lot
 /// (0.10/0.035 -&gt; 0.015/0.006, see plannings/darkness-and-interactivity-spec.md decision D2), but a
 /// themed floor never uses FloorProfile.Ambient at all - MazeGenerator.ResolveTheme takes _theme.Ambient
 /// instead (CLAUDE.md, "Verified facts") - so lowering the profile alone does nothing on floors 1-5; only
 /// the kit maze and the primitive fallback would have gotten darker. FloorTheme's own ambient (authored
-/// by LIGHTS OUT &gt; Build Floor Themes) is up to 0.12 max channel (the Crypt row) and needs relighting to
+/// by LIGHTS OUT &gt; Build &gt; Floor Themes) is up to 0.12 max channel (the Crypt row) and needs relighting to
 /// match. This scales every FloorTheme's ambient colour down so its brightest channel is
 /// TargetMaxChannel, keeping the tint (a warm row stays warmer than a cool one) but bringing every row
 /// into the new range.
@@ -29,23 +30,25 @@ public static class DarknessRelight
     // runs, which would defeat "idempotent".
     private const float Tolerance = 0.0001f;
 
-    [MenuItem("LIGHTS OUT/Relight Floor Themes (Darkness Pass)")]
+    /// <summary>True if any FloorTheme row in the open scene is brighter than the darkness pass allows. Read by ProjectSetup's check.</summary>
+    public static bool NeedsRelight()
+    {
+        foreach (FloorTheme theme in Object.FindObjectsByType<FloorTheme>(FindObjectsInactive.Include, FindObjectsSortMode.None))
+        {
+            SerializedProperty ambientProp = new SerializedObject(theme).FindProperty("ambient");
+            if (ambientProp == null) continue;
+            Color c = ambientProp.colorValue;
+            if (Mathf.Max(c.r, c.g, c.b) > TargetMaxChannel + Tolerance) return true;
+        }
+        return false;
+    }
+
+    /// <summary>No dialogs. Relights every FloorTheme row in the open scene; does nothing if there are none.</summary>
     public static void Relight()
     {
         Scene scene = SceneManager.GetActiveScene();
-        if (!scene.IsValid() || !scene.isLoaded)
-        {
-            EditorUtility.DisplayDialog("Relight Floor Themes", "Open the game scene first.", "OK");
-            return;
-        }
-
         FloorTheme[] themes = Object.FindObjectsByType<FloorTheme>(FindObjectsInactive.Include, FindObjectsSortMode.None);
-        if (themes.Length == 0)
-        {
-            EditorUtility.DisplayDialog("Relight Floor Themes",
-                "No FloorTheme found in this scene. Run LIGHTS OUT > Build Floor Themes first.", "OK");
-            return;
-        }
+        if (!scene.IsValid() || !scene.isLoaded || themes.Length == 0) return;
 
         bool anyChanged = false;
         foreach (FloorTheme theme in themes)

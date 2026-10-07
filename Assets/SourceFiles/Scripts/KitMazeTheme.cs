@@ -2,7 +2,7 @@ using UnityEngine;
 
 /// <summary>
 /// F48: the Maze Modular Puzzle Kit pieces MazeGenerator assembles when GameFlow.UseKitMaze is set.
-/// Authored in the scene by LIGHTS OUT &gt; Build Kit Maze Theme (Assets/Editor/KitMazeThemeBuilder.cs);
+/// Authored in the scene by LIGHTS OUT &gt; Build &gt; Kit Maze Theme (Assets/Editor/KitMazeThemeBuilder.cs);
 /// holds prefab *asset* references loaded from Assets/Maze/Prefabs, not live instances - MazeGenerator
 /// clones these directly, unlike the FloorThemes gallery which clones scene instances.
 /// </summary>

@@ -3,7 +3,8 @@ using UnityEngine;
 
 /// <summary>
 /// What the player is holding, campaign-wide. Statics, reset at the main menu and at
-/// SubsystemRegistration - the economy lives for one campaign and never touches disk.
+/// SubsystemRegistration - the economy lives for one campaign. F83: SaveSystem persists it at the floor
+/// checkpoints through CaptureTo/RestoreFrom.
 /// </summary>
 public static class PlayerInventory
 {
@@ -99,6 +100,77 @@ public static class PlayerInventory
         HudTintIndex = 0;
         _ownedTorchColours = 1;
         _ownedHudTints = 1;
+    }
+
+    /// <summary>F83: writes everything held, pending, active and cosmetic into a save. ShopItem is stored as its int value.</summary>
+    public static void CaptureTo(SaveData data)
+    {
+        data.heldItems = new int[Held.Count];
+        data.heldCounts = new int[Held.Count];
+        int i = 0;
+        foreach (KeyValuePair<ShopItem, int> pair in Held)
+        {
+            data.heldItems[i] = (int)pair.Key;
+            data.heldCounts[i] = pair.Value;
+            i++;
+        }
+
+        data.pendingModifiers = ToIntArray(PendingModifiers);
+        data.activeModifiers = ToIntArray(ActiveModifiers);
+        data.torchColourIndex = TorchColourIndex;
+        data.hudTintIndex = HudTintIndex;
+        data.ownedTorchColours = _ownedTorchColours;
+        data.ownedHudTints = _ownedHudTints;
+    }
+
+    /// <summary>F83: replaces the inventory from a save. Unknown ShopItem values are skipped; null / mismatched arrays are tolerated.</summary>
+    public static void RestoreFrom(SaveData data)
+    {
+        ResetCampaign();
+
+        if (data.heldItems != null && data.heldCounts != null)
+        {
+            int n = Mathf.Min(data.heldItems.Length, data.heldCounts.Length);
+            for (int i = 0; i < n; i++)
+            {
+                if (!System.Enum.IsDefined(typeof(ShopItem), data.heldItems[i])) continue;
+                ShopItem item = (ShopItem)data.heldItems[i];
+                int count = Mathf.Clamp(data.heldCounts[i], 0, CapFor(item));
+                if (count > 0) Held[item] = count;
+            }
+        }
+
+        FillSet(PendingModifiers, data.pendingModifiers);
+        FillSet(ActiveModifiers, data.activeModifiers);
+
+        // Bit 0 (the default look) is always owned.
+        _ownedTorchColours = data.ownedTorchColours | 1;
+        _ownedHudTints = data.ownedHudTints | 1;
+        TorchColourIndex = ValidSelection(data.torchColourIndex, ShopCatalogue.TorchColours.Length, _ownedTorchColours);
+        HudTintIndex = ValidSelection(data.hudTintIndex, ShopCatalogue.HudTints.Length, _ownedHudTints);
+    }
+
+    private static int[] ToIntArray(HashSet<ShopItem> set)
+    {
+        int[] result = new int[set.Count];
+        int i = 0;
+        foreach (ShopItem item in set) result[i++] = (int)item;
+        return result;
+    }
+
+    private static void FillSet(HashSet<ShopItem> set, int[] values)
+    {
+        if (values == null) return;
+        foreach (int v in values)
+        {
+            if (System.Enum.IsDefined(typeof(ShopItem), v)) set.Add((ShopItem)v);
+        }
+    }
+
+    private static int ValidSelection(int index, int paletteLength, int ownedMask)
+    {
+        if (index < 0 || index >= paletteLength || index >= 31) return 0;
+        return (ownedMask & (1 << index)) != 0 ? index : 0;
     }
 
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.SubsystemRegistration)]

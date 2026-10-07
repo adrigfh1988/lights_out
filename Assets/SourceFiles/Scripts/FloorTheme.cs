@@ -2,7 +2,7 @@ using UnityEngine;
 
 /// <summary>
 /// One floor's look, authored as a row of real prefab instances under FloorThemes in the scene (built by
-/// LIGHTS OUT &gt; Build Floor Themes). Owns everything that is a matter of taste: palette, fog colour,
+/// LIGHTS OUT &gt; Build &gt; Floor Themes). Owns everything that is a matter of taste: palette, fog colour,
 /// lamp colour, prop density, and which prefab MazeGenerator clones for each piece of the maze.
 ///
 /// FloorProfile owns the opposite half - everything that affects play (lamp intensity/range, lamp count,

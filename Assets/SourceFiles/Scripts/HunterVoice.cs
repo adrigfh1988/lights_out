@@ -12,13 +12,13 @@ using UnityEngine;
 /// into the capture blackout (GameOutcome.CaptureSequence creates its blackout panel later, as the topmost
 /// sibling, so it covers the bubble). Gameplay-inert: speech never changes what the hunter does.
 ///
-/// Lives on the hunter's own GameObject (LIGHTS OUT &gt; Build Phrase Books adds it there with the book
+/// Lives on the hunter's own GameObject (LIGHTS OUT &gt; Build &gt; Phrase Books adds it there with the book
 /// assigned, so its tunables are editable in the scene); MazeGenerator.SetUpAtmosphere adds it if missing
 /// and calls Configure. No statics.
 /// </summary>
 public class HunterVoice : CreatureVoice
 {
-    [Tooltip("Hunter's lines (Assets/SourceFiles/Data/HunterPhrases.asset). Assigned by LIGHTS OUT > Build Phrase Books; empty = built-in defaults.")]
+    [Tooltip("Hunter's lines (Assets/SourceFiles/Data/HunterPhrases.asset). Assigned by LIGHTS OUT > Build > Phrase Books; empty = built-in defaults.")]
     [SerializeField] private HunterPhraseBook phraseBook;
 
     [Header("Triggers")]
@@ -75,7 +75,7 @@ public class HunterVoice : CreatureVoice
         _book = phraseBook;
         if (_book == null)
         {
-            Debug.LogWarning("HunterVoice: no phrase book assigned on the hunter - using the built-in default lines. Run LIGHTS OUT > Build Phrase Books to make an editable one.", this);
+            Debug.LogWarning("HunterVoice: no phrase book assigned on the hunter - using the built-in default lines. Run LIGHTS OUT > Build > Phrase Books to make an editable one.", this);
             _book = HunterPhraseBook.CreateDefault();
             _bookIsOurs = true;
         }

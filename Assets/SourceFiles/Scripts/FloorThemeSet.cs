@@ -1,7 +1,7 @@
 using UnityEngine;
 
 /// <summary>
-/// The FloorThemes gallery root, built once by LIGHTS OUT &gt; Build Floor Themes. Holds one FloorTheme
+/// The FloorThemes gallery root, built once by LIGHTS OUT &gt; Build &gt; Floor Themes. Holds one FloorTheme
 /// row per floor; MazeGenerator.ResolveTheme finds this in the scene and asks it for the theme to clone.
 /// </summary>
 public class FloorThemeSet : MonoBehaviour

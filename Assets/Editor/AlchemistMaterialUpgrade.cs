@@ -5,10 +5,11 @@ using UnityEngine;
 using UnityEngine.Rendering;
 
 /// <summary>
-/// LIGHTS OUT > Convert Alchemist House Materials. The Alchemist House pack ships on Built-in shaders
-/// (Standard, a GrabPass refraction shader, legacy particles), which render magenta or dead in URP. This
-/// converts them in place, once. Only materials under Assets/BK_AlchemistHouse are ever touched, and
-/// anything already on a URP shader is skipped, so running it again changes nothing.
+/// The Alchemist House pack ships on Built-in shaders (Standard, a GrabPass refraction shader, legacy
+/// particles), which render magenta or dead in URP. This converts them in place, once. Only materials under
+/// Assets/BK_AlchemistHouse are ever touched, and anything already on a URP shader is skipped, so running it
+/// again changes nothing. No menu item of its own any more: every builder that uses the pack (Shop Room,
+/// Floor Themes' alchemist dressing, the re-skinned templates) calls Convert() when NeedsConversion().
 ///
 /// The pack is third-party and untracked: re-importing the package is the undo.
 /// </summary>
@@ -21,27 +22,6 @@ public static class AlchemistMaterialUpgrade
 
     // The torch is live in the shop and a glossy surface flares straight back down the beam.
     private const float MaxSmoothness = 0.35f;
-
-    [MenuItem("LIGHTS OUT/Convert Alchemist House Materials")]
-    public static void ConvertFromMenu()
-    {
-        if (!NeedsConversion())
-        {
-            EditorUtility.DisplayDialog("Convert Alchemist House Materials", "Every material in the pack is already on a URP shader.", "OK");
-            return;
-        }
-
-        if (!EditorUtility.DisplayDialog("Convert Alchemist House Materials",
-                "This rewrites the shaders of the materials under " + PackFolder + " in place (Standard to URP Lit, plus the glass and particle materials). " +
-                "Re-importing the package is the only undo. Continue?",
-                "Convert", "Cancel"))
-        {
-            return;
-        }
-
-        int changed = Convert();
-        EditorUtility.DisplayDialog("Convert Alchemist House Materials", $"Converted {changed} materials.", "OK");
-    }
 
     /// <summary>True if any material under the pack is still on a non-URP shader.</summary>
     public static bool NeedsConversion()

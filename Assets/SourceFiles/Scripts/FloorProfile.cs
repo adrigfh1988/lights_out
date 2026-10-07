@@ -50,7 +50,7 @@ public class FloorProfile
 
     /// <summary>
     /// Names the theme numbers <see cref="FloorThemes"/> assigns from - one row per "type of floor",
-    /// matching a row built by LIGHTS OUT &gt; Build Floor Themes (<c>Assets/Editor/FloorThemeBuilder.cs</c>,
+    /// matching a row built by LIGHTS OUT &gt; Build &gt; Floor Themes (<c>Assets/Editor/FloorThemeBuilder.cs</c>,
     /// its <c>rowNames</c> array). Add a new type here (and a matching builder/row) to grow the list;
     /// nothing else needs to change.
     /// </summary>

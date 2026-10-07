@@ -6,7 +6,7 @@ using UnityEngine;
 using UnityEngine.SceneManagement;
 
 /// <summary>
-/// LIGHTS OUT &gt; Build Floor Themes. Generates five floors' worth of themed set-dressing - materials
+/// LIGHTS OUT &gt; Build &gt; Floor Themes. Generates five floors' worth of themed set-dressing - materials
 /// and prefabs under Assets/SourceFiles/Themes, and a scene gallery (FloorThemes) with one live prefab
 /// instance of each piece per floor - so an artist can inspect and retouch every piece MazeGenerator
 /// clones at Play time. Nothing here runs in a build; at Play time MazeGenerator.ResolveTheme just finds
@@ -34,7 +34,7 @@ public static partial class FloorThemeBuilder
 
     private static Material _plinthMaterial;
 
-    [MenuItem("LIGHTS OUT/Build Floor Themes")]
+    [MenuItem("LIGHTS OUT/Build/Floor Themes", priority = 100)]
     public static void Build()
     {
         Scene scene = SceneManager.GetActiveScene();
@@ -59,8 +59,21 @@ public static partial class FloorThemeBuilder
             "Keep the existing materials and prefabs under Assets/SourceFiles/Themes (any hand edits survive), or delete and rebuild everything?",
             "Keep existing assets (recommended)", "Cancel", "Replace everything");
         if (choice == 1) return; // Cancel
-        bool replaceAssets = choice == 2;
 
+        BuildSilently(replaceAssets: choice == 2);
+    }
+
+    /// <summary>No dialogs: replaces any existing gallery, keeping the theme assets unless replaceAssets. Used by LIGHTS OUT &gt; Build Missing Pieces.</summary>
+    public static void BuildSilently(bool replaceAssets = false)
+    {
+        Scene scene = SceneManager.GetActiveScene();
+        if (!scene.IsValid() || !scene.isLoaded)
+        {
+            Debug.LogError("Build Floor Themes: open the game scene first.");
+            return;
+        }
+
+        FloorThemeSet existingSet = UnityEngine.Object.FindAnyObjectByType<FloorThemeSet>(FindObjectsInactive.Include);
         if (existingSet != null) Undo.DestroyObjectImmediate(existingSet.gameObject);
         if (replaceAssets && AssetDatabase.IsValidFolder(ThemesRoot)) AssetDatabase.DeleteAsset(ThemesRoot);
         EnsureFolder(ThemesRoot);
@@ -92,6 +105,9 @@ public static partial class FloorThemeBuilder
             floorsProp.GetArrayElementAtIndex(i).objectReferenceValue = builtThemes[i];
         }
         setSo.ApplyModifiedPropertiesWithoutUndo();
+
+        // The builders' ambient colours predate the F71 darkness pass; bring the fresh rows down to it.
+        DarknessRelight.Relight();
 
         AssetDatabase.SaveAssets();
         Selection.activeGameObject = galleryRoot;
