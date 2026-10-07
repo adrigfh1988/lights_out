@@ -127,6 +127,17 @@ public static class ProjectSetup
         },
         new Piece
         {
+            Name = "Last untextured pieces (F90)",
+            FixMenu = "Build Missing Pieces (or Build > Floor Themes)",
+            Problem = () =>
+            {
+                List<string> bad = RemainingPrimitivesCleanup.Problems();
+                return bad.Count == 0 ? null : string.Join("; ", bad);
+            },
+            Build = () => RemainingPrimitivesCleanup.Apply()
+        },
+        new Piece
+        {
             Name = "Phrase books (Stan + hunter)",
             FixMenu = "Build > Phrase Books (Stan + Hunter)",
             Problem = PhraseBookProblem,

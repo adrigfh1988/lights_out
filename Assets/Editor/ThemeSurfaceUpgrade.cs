@@ -6,9 +6,10 @@ using UnityEngine;
 /// <summary>
 /// F88: real PBR surface textures (ambientCG, CC0 - see Assets/SourceFiles/Textures/PBR/CREDITS.md) on the structural
 /// materials of the themed floors that play: Ward (1), BoilerDeck (2), Crypt (3 and 5, which borrows the Crypt row) and Lab (4).
-/// Walls, floors and ceilings only; the Hollow row, the kit maze, the shop and the Intake are out of scope. Pillars share
-/// materials with trim pieces (Ward_Dado, Boiler_Iron, Lab_Metal), so they are left plain, except the Crypt pillar, which is
-/// Crypt_Stone and so is textured with the wall.
+/// Walls, floors and ceilings; the Hollow row, the kit maze, the shop and the Intake are out of scope. F90 extends the table with
+/// the pillars (Ward_Pillar / Boiler_Pillar / Lab_Pillar, created from the wall material when missing and given the wall's set at
+/// a column's tiling; the Crypt pillar is Crypt_Stone already) and the gameplay-fixture metals and wood (lockers, lamp housings,
+/// shutter, call bell, steam valve: library sets with a constant smoothness / metallic, colour kept as a tint).
 ///
 /// Run automatically at the end of LIGHTS OUT &gt; Build &gt; Floor Themes (a "Replace everything" rebuild recreates the
 /// materials untextured and this puts the textures back) and flagged by LIGHTS OUT &gt; Check Project. Idempotent: a material that
@@ -36,6 +37,8 @@ public static class ThemeSurfaceUpgrade
         public float MetalScale;     // 0 = ignore the set's metalness map (stone, tile, plaster); <1 keeps metal from going black without reflections
         public float NormalScale;    // _BumpScale
         public float Occlusion;      // _OcclusionStrength (only used when the set has an AO map)
+        public float Metallic;       // constant _Metallic for Library rows (they ship no metalness map); 0 otherwise
+        public string CopyFrom;      // F90: path (under Themes) of a material this one is created from when it does not exist yet (a pillar from its wall)
     }
 
     private static readonly Row[] Rows =
@@ -56,9 +59,32 @@ public static class ThemeSurfaceUpgrade
         new Row { Material = "4_Lab/Materials/Lab_Wall",           SetId = "MetalPlates004",   Tiling = new Vector2(3f, 2f), Tint = new Color(0.20f, 0.25f, 0.30f), Smoothness = 0.6f,  MetalScale = 0.35f, NormalScale = 1f,   Occlusion = 1f },
         new Row { Material = "4_Lab/Materials/Lab_Floor",          SetId = "Concrete033",      Tiling = new Vector2(2f, 2f), Tint = new Color(0.25f, 0.26f, 0.32f), Smoothness = 0.6f,  MetalScale = 0f,    NormalScale = 1f,   Occlusion = 1f },
         new Row { Material = "4_Lab/Materials/Lab_Ceiling",        SetId = "OfficeCeiling001", Tiling = new Vector2(2f, 2f), Tint = new Color(0.10f, 0.10f, 0.11f), Smoothness = 0.3f,  MetalScale = 0f,    NormalScale = 1f,   Occlusion = 0.8f },
+        // ---- F90: the last plain pieces. Pillars use the wall's own set at a column's tiling (a wall face is 5 x 4 m at 3 x 2 repeats,
+        // i.e. 1.67 x 2 m per repeat, so a 0.7 x 4 m column face is 0.42 x 2 - same texel density, no stretch).
+        new Row { Material = "1_Ward/Materials/Ward_Pillar",       CopyFrom = "1_Ward/Materials/Ward_Wall",       SetId = "Tiles107",       Tiling = new Vector2(0.42f, 2f), Tint = new Color(0.56f, 0.64f, 0.60f), Smoothness = 0.55f, MetalScale = 0f,    NormalScale = 1f, Occlusion = 0.8f },
+        new Row { Material = "2_BoilerDeck/Materials/Boiler_Pillar", CopyFrom = "2_BoilerDeck/Materials/Boiler_Wall", SetId = "MetalPlates011", Tiling = new Vector2(0.42f, 2f), Tint = new Color(1f, 1f, 1f),            Smoothness = 0.6f,  MetalScale = 0.35f, NormalScale = 1f, Occlusion = 0.8f },
+        new Row { Material = "4_Lab/Materials/Lab_Pillar",         CopyFrom = "4_Lab/Materials/Lab_Wall",         SetId = "MetalPlates004", Tiling = new Vector2(0.42f, 2f), Tint = new Color(0.20f, 0.25f, 0.30f), Smoothness = 0.6f,  MetalScale = 0.35f, NormalScale = 1f, Occlusion = 1f },
+        // Gameplay fixtures (lockers, lamp housings, the shutter, the call bell, the steam valve): library metal / wood, colour kept as a tint.
+        // Library sets ship no metalness map, so Metallic is a constant - kept low, there are no reflections to light a mirror-metal in this dark.
+        new Row { Material = "1_Ward/Materials/Ward_Metal",        SetId = "painted_metal_shutter", Library = true, Tiling = new Vector2(1f, 1f), Tint = new Color(0.78f, 0.82f, 0.80f), Smoothness = 0.45f, Metallic = 0.25f, NormalScale = 1f, Occlusion = 1f },
+        new Row { Material = "1_Ward/Materials/Ward_Cross",        SetId = "painted_metal_shutter", Library = true, Tiling = new Vector2(1f, 1f), Tint = new Color(0.62f, 0.10f, 0.10f), Smoothness = 0.4f,  Metallic = 0f,    NormalScale = 1f, Occlusion = 1f },
+        new Row { Material = "2_BoilerDeck/Materials/Boiler_Iron", SetId = "rusty_metal",           Library = true, Tiling = new Vector2(1f, 1f), Tint = new Color(0.50f, 0.48f, 0.46f), Smoothness = 0.35f, Metallic = 0.25f, NormalScale = 1f, Occlusion = 1f },
+        new Row { Material = "2_BoilerDeck/Materials/Boiler_Rust", SetId = "rusty_metal_02",        Library = true, Tiling = new Vector2(1f, 1f), Tint = new Color(0.75f, 0.50f, 0.38f), Smoothness = 0.25f, Metallic = 0f,    NormalScale = 1f, Occlusion = 1f },
+        new Row { Material = "3_Crypt/Materials/Crypt_Iron",       SetId = "rusty_metal_02",        Library = true, Tiling = new Vector2(1f, 1f), Tint = new Color(0.34f, 0.33f, 0.33f), Smoothness = 0.3f,  Metallic = 0.2f,  NormalScale = 1f, Occlusion = 1f },
+        new Row { Material = "3_Crypt/Materials/Crypt_Wood",       SetId = "dark_wood",             Library = true, Tiling = new Vector2(1f, 1f), Tint = new Color(0.55f, 0.48f, 0.42f), Smoothness = 0.25f, Metallic = 0f,    NormalScale = 1f, Occlusion = 1f },
+        new Row { Material = "4_Lab/Materials/Lab_Metal",          SetId = "metal_plate",           Library = true, Tiling = new Vector2(1f, 1f), Tint = new Color(0.34f, 0.38f, 0.43f), Smoothness = 0.5f,  Metallic = 0.25f, NormalScale = 1f, Occlusion = 1f },
+        new Row { Material = InteractableMaterials + "/Interactable_Shutter",    SetId = "painted_metal_shutter", Library = true, Tiling = new Vector2(1f, 1f), Tint = new Color(0.42f, 0.44f, 0.47f), Smoothness = 0.4f, Metallic = 0.25f, NormalScale = 1f, Occlusion = 1f },
+        new Row { Material = InteractableMaterials + "/Interactable_BellMetal",  SetId = "metal_plate",           Library = true, Tiling = new Vector2(1f, 1f), Tint = new Color(0.72f, 0.58f, 0.24f), Smoothness = 0.6f, Metallic = 0.3f,  NormalScale = 1f, Occlusion = 1f },
+        new Row { Material = InteractableMaterials + "/Interactable_ValveMetal", SetId = "rusty_metal",           Library = true, Tiling = new Vector2(1f, 1f), Tint = new Color(0.50f, 0.46f, 0.42f), Smoothness = 0.35f, Metallic = 0.25f, NormalScale = 1f, Occlusion = 1f },
+        new Row { Material = InteractableMaterials + "/Interactable_FuseLever",   SetId = "metal_plate",           Library = true, Tiling = new Vector2(1f, 1f), Tint = new Color(0.30f, 0.30f, 0.32f), Smoothness = 0.5f,  Metallic = 0.25f, NormalScale = 1f, Occlusion = 1f },
+        new Row { Material = InteractableMaterials + "/Interactable_BatteryBody", SetId = "painted_metal_shutter", Library = true, Tiling = new Vector2(1f, 1f), Tint = new Color(0.45f, 0.47f, 0.50f), Smoothness = 0.45f, Metallic = 0.2f,  NormalScale = 1f, Occlusion = 1f },
+        new Row { Material = InteractableMaterials + "/Interactable_TerminalCase", SetId = "metal_plate",          Library = true, Tiling = new Vector2(1f, 1f), Tint = new Color(0.38f, 0.40f, 0.42f), Smoothness = 0.4f,  Metallic = 0.2f,  NormalScale = 1f, Occlusion = 1f },
+        new Row { Material = InteractableMaterials + "/Interactable_KeyHook",     SetId = "rusty_metal",           Library = true, Tiling = new Vector2(1f, 1f), Tint = new Color(0.35f, 0.35f, 0.37f), Smoothness = 0.35f, Metallic = 0.2f,  NormalScale = 1f, Occlusion = 1f },
     };
 
-    private static string MatPath(Row r) => $"{Themes}/{r.Material}.mat";
+    private const string InteractableMaterials = "Assets/SourceFiles/Materials/Interactables";
+
+    private static string MatPath(Row r) => r.Material.StartsWith("Assets/") ? r.Material + ".mat" : $"{Themes}/{r.Material}.mat";
     private const string LibRoot = "Assets/GreenMossGames/UltimateMaterialLibrary/Textures";
 
     private static string Map(Row r, string suffix, string ext = "jpg")
@@ -97,7 +123,8 @@ public static class ThemeSurfaceUpgrade
         if (m.GetTexture("_BaseMap") != color) return "no albedo";
         if (m.GetTexture("_BumpMap") == null || !AssetDatabase.GetAssetPath(m.GetTexture("_BumpMap")).Contains(r.SetId)) return "no normal map";
         if (!r.Library && m.GetTexture("_MetallicGlossMap") == null) return "no smoothness map";
-        if (r.Library && (m.GetTexture("_MetallicGlossMap") != null || Mathf.Abs(m.GetFloat("_Smoothness") - r.Smoothness) > 0.001f)) return "smoothness";
+        if (r.Library && (m.GetTexture("_MetallicGlossMap") != null || Mathf.Abs(m.GetFloat("_Smoothness") - r.Smoothness) > 0.001f
+                          || Mathf.Abs(m.GetFloat("_Metallic") - r.Metallic) > 0.001f)) return "smoothness";
         if (Vector2.Distance(m.GetTextureScale("_BaseMap"), r.Tiling) > 0.001f) return "tiling";
         return null;
     }
@@ -111,6 +138,16 @@ public static class ThemeSurfaceUpgrade
         {
             if (MaterialProblem(r) == null) continue;
             Material m = AssetDatabase.LoadAssetAtPath<Material>(MatPath(r));
+            if (m == null && r.CopyFrom != null)
+            {
+                // F90: a pillar material that an older scene never had - start it as a copy of the wall's, Wire overwrites the texture set.
+                string from = $"{Themes}/{r.CopyFrom}.mat";
+                if (AssetDatabase.LoadAssetAtPath<Material>(from) != null && AssetDatabase.CopyAsset(from, MatPath(r)))
+                {
+                    AssetDatabase.ImportAsset(MatPath(r), ImportAssetOptions.ForceSynchronousImport);
+                    m = AssetDatabase.LoadAssetAtPath<Material>(MatPath(r));
+                }
+            }
             if (m == null) { Debug.LogWarning($"ThemeSurfaceUpgrade: {MatPath(r)} is missing, skipped."); continue; }
             if (!File.Exists(Map(r, "Color")) || !File.Exists(Map(r, "NormalGL")))
             {
@@ -251,7 +288,7 @@ public static class ThemeSurfaceUpgrade
         {
             m.SetTexture("_MetallicGlossMap", null);
             m.DisableKeyword("_METALLICSPECGLOSSMAP");
-            m.SetFloat("_Metallic", 0f);
+            m.SetFloat("_Metallic", r.Metallic);
             m.SetFloat("_Smoothness", r.Smoothness);
         }
         else if (packed != null)

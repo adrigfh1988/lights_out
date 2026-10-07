@@ -141,16 +141,14 @@ public static class InteractableKitBuilder
         }
         if (glassProp.objectReferenceValue == null)
         {
-            NoisySurface glass = BuildFloorPatch(root.transform, new Vector3(x, 0.01f, 0f), "GlassPatch",
-                new Color(0.55f, 0.6f, 0.5f), new Color(0.55f, 0.6f, 0.5f) * 0.8f);
+            NoisySurface glass = BuildFloorPatch(root.transform, new Vector3(x, 0.01f, 0f), "GlassPatch", glass: true);
             glassProp.objectReferenceValue = glass;
             x += PieceSpacing;
             built++;
         }
         if (puddleProp.objectReferenceValue == null)
         {
-            NoisySurface puddle = BuildFloorPatch(root.transform, new Vector3(x, 0.01f, 0f), "Puddle",
-                new Color(0.05f, 0.08f, 0.1f), null);
+            NoisySurface puddle = BuildFloorPatch(root.transform, new Vector3(x, 0.01f, 0f), "Puddle", glass: false);
             puddleProp.objectReferenceValue = puddle;
             x += PieceSpacing;
             built++;
@@ -249,7 +247,22 @@ public static class InteractableKitBuilder
             }
         }
 
+        // F90: the currency shard's model (a pack item), same build-missing-only rule. Optional - without the pack the slot stays
+        // empty and MazeGenerator.BuildShard keeps its cube.
+        SerializedProperty shardProp = so.FindProperty("shardModel");
+        if (shardProp.objectReferenceValue == null)
+        {
+            GameObject shardModel = BuildShardModel(root.transform, new Vector3(x, 0.5f, 0f));
+            if (shardModel != null)
+            {
+                shardProp.objectReferenceValue = shardModel;
+                x += PieceSpacing;
+                built++;
+            }
+        }
+
         so.ApplyModifiedPropertiesWithoutUndo();
+        ThemeSurfaceUpgrade.Apply(); // F88/F90: the fixture materials (shutter, bell, valve) get their texture sets
         AssetDatabase.SaveAssets();
 
         Selection.activeGameObject = root;
@@ -294,6 +307,58 @@ public static class InteractableKitBuilder
         so.ApplyModifiedPropertiesWithoutUndo();
 
         Build();
+    }
+
+    /// <summary>
+    /// F90: brings an existing kit to the new floor-patch looks, the shelved lore note and the pack-model shard: the glassPatch, puddle,
+    /// loreNote and shardModel slots are emptied (their gallery objects destroyed) and Build() re-creates just those. No dialogs, no menu
+    /// item - RemainingPrimitivesCleanup drives it. Save the scene afterwards.
+    /// </summary>
+    public static void RebuildF90Templates()
+    {
+        InteractableKit kit = Object.FindAnyObjectByType<InteractableKit>(FindObjectsInactive.Include);
+        if (kit == null) { Build(); return; }
+
+        if (AlchemistMaterialUpgrade.NeedsConversion()) AlchemistMaterialUpgrade.Convert();
+
+        SerializedObject so = new SerializedObject(kit);
+        foreach (string slot in new[] { "glassPatch", "puddle", "loreNote" })
+        {
+            SerializedProperty prop = so.FindProperty(slot);
+            Component old = prop.objectReferenceValue as Component;
+            prop.objectReferenceValue = null;
+            if (old != null) Undo.DestroyObjectImmediate(old.gameObject);
+        }
+        SerializedProperty shard = so.FindProperty("shardModel");
+        GameObject oldShard = shard.objectReferenceValue as GameObject;
+        shard.objectReferenceValue = null;
+        if (oldShard != null) Undo.DestroyObjectImmediate(oldShard);
+        so.ApplyModifiedPropertiesWithoutUndo();
+
+        Build();
+    }
+
+    private const string PackShard = "Items/Organic/Bulb01";
+    /// <summary>Bulb01 is a 13 x 7 x 14 cm lumpy cluster; x2.4 gives a 31 x 17 x 34 cm crystal-sized lump.</summary>
+    private const float PackShardScale = 2.4f;
+
+    /// <summary>
+    /// F90: the shard's model - the pack's lumpy Bulb01 cluster (nothing in the pack is a gem or a coin) centred on the root's origin, no
+    /// collider. MazeGenerator.BuildShard clones the root's children under every shard and swaps in the glowing Maze_Shard material, so the
+    /// glow and colour stay the runtime's; the pack texture only shows in the gallery. Null if the pack is not in the project.
+    /// </summary>
+    private static GameObject BuildShardModel(Transform parent, Vector3 localPosition)
+    {
+        if (!HasPackPrefab(PackShard)) return null;
+
+        GameObject root = new GameObject("ShardModel");
+        root.transform.SetParent(parent, false);
+        root.transform.localPosition = localPosition;
+
+        GameObject model = AlchemistPack.Spawn(root.transform, PackShard, PackShardScale);
+        Bounds b = AlchemistPack.RenderBounds(model);
+        model.transform.position += root.transform.position - b.center;
+        return root;
     }
 
     /// <summary>
@@ -575,7 +640,7 @@ public static class InteractableKitBuilder
     private const string PackBottle = "Items/Bottles/Bottle02";
     private const string PackCan = "Items/Dishes/ClutterTanker01";
     private const string PackLantern = "Items/Lights/Oillamp01_on";
-    private const string PackNote = "Items/Books/Book09";
+    private const string PackNote = "Items/Books/Book12";
     private const float PackNoteScale = 1.5f;
 
     private static readonly BottleVariant[] BottleVariants =
@@ -681,18 +746,24 @@ public static class InteractableKitBuilder
         return item;
     }
 
-    /// <summary>Shared by glassPatch/puddle: a flat quad lying on the floor. `emission` null = a matte (non-glowing) puddle; a colour = glass's faint glassy sheen.</summary>
-    private static NoisySurface BuildFloorPatch(Transform parent, Vector3 localPosition, string name, Color color, Color? emission)
+    /// <summary>
+    /// Shared by glassPatch/puddle: a flat 1.6 m decal quad ("Look", no collider - the NoisySurface trigger is the only footprint) lying on
+    /// the floor. F90: the look is a transparent decal (broken-glass shards / a dark glossy pool, see NoisePatchLook), not a flat coloured square.
+    /// </summary>
+    private static NoisySurface BuildFloorPatch(Transform parent, Vector3 localPosition, string name, bool glass)
     {
-        Material mat = LoadOrCreateMat($"Interactable_{name}", color, emission, 0.75f);
+        Material mat = LoadOrCreateMat($"Interactable_{name}", Color.white, null, 0.9f);
+        if (glass) NoisePatchLook.ApplyGlass(mat); else NoisePatchLook.ApplyPuddle(mat);
 
         GameObject root = new GameObject(name);
         root.transform.SetParent(parent, false);
         root.transform.localPosition = localPosition;
 
-        GameObject quad = Primitive(root.transform, PrimitiveType.Quad, "Quad", Vector3.zero, Vector3.one * 1.6f, mat, keepCollider: false,
+        GameObject quad = Primitive(root.transform, PrimitiveType.Quad, "Look", Vector3.zero, new Vector3(NoisePatchLook.Size, NoisePatchLook.Size, 1f), mat, keepCollider: false,
             localRotation: Quaternion.Euler(90f, 0f, 0f));
         quad.transform.localPosition = Vector3.up * 0.005f;
+        MeshRenderer renderer = quad.GetComponent<MeshRenderer>();
+        renderer.shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
 
         return root.AddComponent<NoisySurface>();
     }
@@ -767,48 +838,74 @@ public static class InteractableKitBuilder
         return lantern;
     }
 
+    private const string PackShelf = "Furniture/WoodShelf01";
+    /// <summary>The pack shelf is a 1.8 m plank; x0.45 makes a 0.8 m bracket shelf, wide enough for the book and a glint.</summary>
+    private const float PackShelfScale = 0.45f;
+    private const float PackNoteLean = 10f;
+
     /// <summary>
-    /// A closed pack book (Book09 x1.5) lying flat against the Edge quad, cover towards +Z - the side
-    /// MazeGenerator.BuildLoreNotes faces into the corridor (LookRotation(-dirVec)). The Edge quad and its
-    /// BoxCollider are exactly what the primitive note has: they carry the click target.
-    /// Note for the reviewer: the built-in Quad is visible from its -Z side only, so the old Paper and Edge
-    /// quads face the wall once placed; the book is built to face the corridor instead.
+    /// F90: an Alchemist book standing on a small hung pack shelf, leaning back against the wall - not a flat panel stuck to it. The root
+    /// sits on the wall face with +Z into the corridor (MazeGenerator.BuildLoreNotes faces it with LookRotation(-dirVec), the Intake does
+    /// the same), the shelf's back at z = -0.02 and its top 0.18 m under the root, the book (Book09 x1.5, cover to +Z) on it. One
+    /// BoxCollider on the root around shelf + book is the click target (it replaces the old Edge quad's); a small warm point light
+    /// pulsing through StarPulse keeps it findable in the dark. Falls back to the primitive note without the pack.
     /// </summary>
     private static LoreNote BuildLoreNote(Transform parent, Vector3 localPosition)
     {
-        if (!HasPackPrefab(PackNote))
+        if (!HasPackPrefab(PackNote) || !HasPackPrefab(PackShelf))
         {
-            Debug.LogWarning($"InteractableKitBuilder: {AlchemistPack.Prefabs}{PackNote}.prefab not found - building the primitive note instead.");
+            Debug.LogWarning($"InteractableKitBuilder: {AlchemistPack.Prefabs}{PackNote}.prefab or {PackShelf}.prefab not found - building the primitive note instead.");
             return BuildLoreNotePrimitive(parent, localPosition);
         }
-
-        Material edgeMat = LoadOrCreateMat("Interactable_NoteEdge", new Color(0.9f, 0.85f, 0.5f), new Color(0.9f, 0.85f, 0.5f) * 1.2f, 0.1f);
 
         GameObject root = new GameObject("LoreNote");
         root.transform.SetParent(parent, false);
         root.transform.localPosition = localPosition;
+        Vector3 origin = root.transform.position;
 
-        // A Quad only renders from its -Z side and MazeGenerator.BuildLoreNotes points the root's +Z into
-        // the corridor, so the glow border is turned to face +Z here (the primitive note never was, and
-        // cannot be seen from the corridor). It sits between the wall and the book's back cover.
-        GameObject edge = Primitive(root.transform, PrimitiveType.Quad, "Edge", new Vector3(0f, 0f, 0.005f), new Vector3(0.42f, 0.58f, 1f), edgeMat, keepCollider: false,
-            localRotation: Quaternion.Euler(0f, 180f, 0f));
-        BoxCollider box = edge.AddComponent<BoxCollider>();
-        box.size = new Vector3(1f, 1f, 0.1f);
+        // Shelf: long axis along X, centred on the root, back just off the wall plane, top 0.18 m below the root.
+        GameObject shelf = AlchemistPack.Spawn(root.transform, PackShelf, PackShelfScale);
+        Bounds sb = AlchemistPack.RenderBounds(shelf);
+        if (sb.size.z > sb.size.x) shelf.transform.rotation = Quaternion.Euler(0f, 90f, 0f) * shelf.transform.rotation;
+        sb = AlchemistPack.RenderBounds(shelf);
+        shelf.transform.position += new Vector3(origin.x - sb.center.x, origin.y - 0.18f - sb.max.y, origin.z - 0.02f - sb.min.z);
+        sb = AlchemistPack.RenderBounds(shelf);
 
+        // Book: upright with its thin axis on Z, leaning back, standing on the shelf's top against the wall side.
         GameObject book = AlchemistPack.Spawn(root.transform, PackNote, PackNoteScale);
         Bounds b = AlchemistPack.RenderBounds(book);
-        // Upright, thin axis along Z (a book standing against the wall); yaw picks which cover looks out.
         if (b.size.x < b.size.z) book.transform.rotation = Quaternion.Euler(0f, 90f, 0f) * book.transform.rotation;
         book.transform.rotation = Quaternion.Euler(0f, NoteBookYaw, 0f) * book.transform.rotation;
+        book.transform.rotation = Quaternion.Euler(0f, 0f, NoteBookRoll) * book.transform.rotation;
+        book.transform.rotation = Quaternion.Euler(-PackNoteLean, 0f, 0f) * book.transform.rotation;
         b = AlchemistPack.RenderBounds(book);
-        book.transform.position += new Vector3(root.transform.position.x - b.center.x, root.transform.position.y - b.center.y, root.transform.position.z + 0.012f - b.min.z);
+        book.transform.position += new Vector3(origin.x - b.center.x, sb.max.y + 0.003f - b.min.y, sb.min.z + 0.02f - b.min.z);
+        b = AlchemistPack.RenderBounds(book);
+
+        Bounds all = sb;
+        all.Encapsulate(b);
+        BoxCollider box = root.AddComponent<BoxCollider>();
+        box.center = root.transform.InverseTransformPoint(all.center);
+        box.size = new Vector3(all.size.x + 0.1f, all.size.y + 0.1f, Mathf.Max(0.25f, all.size.z));
+
+        GameObject glint = new GameObject("Glint");
+        glint.transform.SetParent(root.transform, false);
+        glint.transform.position = new Vector3(origin.x, b.center.y, origin.z + 0.5f);
+        Light light = glint.AddComponent<Light>();
+        light.type = LightType.Point;
+        light.color = new Color(1f, 0.82f, 0.5f);
+        light.range = 1.8f;
+        light.intensity = 0.3f;
+        light.shadows = LightShadows.None;
+        glint.AddComponent<StarPulse>(); // picks up the Light in Awake; +-30 % at 0.5 Hz like a star
 
         return root.AddComponent<LoreNote>();
     }
 
     /// <summary>Which way the book is turned about Y after its thin axis is put on Z: 0 or 180 (set from a visual check, so the cover - not the back - faces +Z).</summary>
-    private const float NoteBookYaw = 0f;
+    private const float NoteBookYaw = 180f;
+    /// <summary>Roll about Z after the yaw: the pack model's title page reads upside down with its spine on the right as it comes out of the prefab.</summary>
+    private const float NoteBookRoll = 180f;
 
     private static LoreNote BuildLoreNotePrimitive(Transform parent, Vector3 localPosition)
     {

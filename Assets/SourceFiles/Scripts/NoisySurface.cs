@@ -33,7 +33,14 @@ public class NoisySurface : MonoBehaviour
     public void Configure(Kind newKind, float? diameter = null)
     {
         kind = newKind;
-        if (diameter.HasValue) triggerSize = diameter.Value;
+        if (diameter.HasValue)
+        {
+            triggerSize = diameter.Value;
+            // F90: a shatter patch is smaller than an authored one, and so is what you see on the floor (visual only, the trigger below is unchanged).
+            Transform look = transform.Find("Look");
+            if (look == null) look = transform.Find("Quad");
+            if (look != null) look.localScale = new Vector3(triggerSize, triggerSize, 1f);
+        }
 
         walkMultiplier = kind == Kind.Glass ? 3f : 2f;
         sprintMultiplier = kind == Kind.Glass ? 1.6f : 1.3f;

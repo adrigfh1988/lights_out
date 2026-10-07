@@ -17,6 +17,14 @@ public class StarPulse : MonoBehaviour
     private Light _light;
     private float _baseIntensity;
 
+    /// <summary>F90: an authored template (the lore note's glint) carries a Light and no Configure call - pick it up here. Configure still overrides.</summary>
+    private void Awake()
+    {
+        if (_light != null) return;
+        _light = GetComponent<Light>();
+        if (_light != null) _baseIntensity = _light.intensity;
+    }
+
     /// <summary>Called once by MazeGenerator.AttachStarLight right after the Light is created.</summary>
     public void Configure(Light light)
     {

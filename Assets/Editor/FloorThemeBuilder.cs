@@ -122,6 +122,7 @@ public static partial class FloorThemeBuilder
         CorpseUpgrade.Apply();
         PackDressing.Apply(); // F85: any pack piece a hand-edited row or an older scene lacks
         PrimitiveDressingCleanup.Apply(); // F89: no untextured primitive dressing in an older or hand-edited row
+        RemainingPrimitivesCleanup.Apply(); // F90: no untextured wall trims or plain pillars; kit patches / note / shard on their new looks
         ThemeSurfaceUpgrade.Apply(); // F88: real PBR surface textures on the structural theme materials
 
         AssetDatabase.SaveAssets();
@@ -453,7 +454,7 @@ public static partial class FloorThemeBuilder
         const string tiles = "Assets/SourceFiles/Textures/Repeating Tiles";
 
         Material wallMat = LoadOrCreateMat(folder, "Ward_Wall", new Color(0.55f, 0.62f, 0.58f), "Assets/SourceFiles/Textures/Grid/Grid_02_BaseMap.png", null, new Vector2(2f, 1f), null);
-        Material dadoMat = LoadOrCreateMat(folder, "Ward_Dado", new Color(0.16f, 0.26f, 0.21f), null, null, Vector2.one, null);
+        Material pillarMat = LoadOrCreateMat(folder, "Ward_Pillar", new Color(0.56f, 0.64f, 0.60f), null, null, Vector2.one, null); // F90: the wall's tile set at a column's tiling (ThemeSurfaceUpgrade)
         Material floorMat = LoadOrCreateMat(folder, "Ward_Floor", new Color(0.40f, 0.41f, 0.39f), $"{tiles}/Tile_CheckerBoard_Albedo.png", $"{tiles}/Tile_CheckerBoard_normal.png", new Vector2(4f, 4f), null);
         Material ceilingMat = LoadOrCreateMat(folder, "Ward_Ceiling", new Color(0.50f, 0.50f, 0.48f), null, null, Vector2.one, null);
         Material metalMat = LoadOrCreateMat(folder, "Ward_Metal", new Color(0.70f, 0.72f, 0.70f), null, null, Vector2.one, null);
@@ -461,18 +462,14 @@ public static partial class FloorThemeBuilder
         Material glassMat = LoadOrCreateMat(folder, "Ward_Glass", glassColor, null, null, Vector2.one, glassColor * 2.5f);
         Material crossMat = LoadOrCreateMat(folder, "Ward_Cross", new Color(0.6f, 0.1f, 0.1f), null, null, Vector2.one, null);
 
-        // Wall: body + a dado band, skirting and cornice.
+        // Wall: just the textured body (the dado band, skirting and cornice were untextured trims - F90).
         GameObject wallRoot = new GameObject("Ward_Wall");
         Box(wallRoot.transform, "Body", new Vector3(0f, 2f, 0f), new Vector3(5f, 4f, 0.5f), wallMat, keepCollider: true);
-        Box(wallRoot.transform, "Dado", new Vector3(0f, 1.1f, 0f), new Vector3(5f, 0.12f, 0.54f), dadoMat);
-        Box(wallRoot.transform, "Skirting", new Vector3(0f, 0.075f, 0f), new Vector3(5f, 0.15f, 0.54f), dadoMat);
-        Box(wallRoot.transform, "Cornice", new Vector3(0f, 3.95f, 0f), new Vector3(5f, 0.1f, 0.54f), dadoMat);
         WallPiece wall = FinishWall(wallRoot, folder);
 
-        // Pillar: box body with a capital cap.
+        // Pillar: a plain textured column (the metal cap was an untextured trim - F90).
         GameObject pillarRoot = new GameObject("Ward_Pillar");
-        Box(pillarRoot.transform, "Body", new Vector3(0f, 2f, 0f), new Vector3(0.7f, 4f, 0.7f), dadoMat, keepCollider: true);
-        Box(pillarRoot.transform, "Cap", new Vector3(0f, 3.95f, 0f), new Vector3(0.8f, 0.1f, 0.8f), metalMat);
+        Box(pillarRoot.transform, "Body", new Vector3(0f, 2f, 0f), new Vector3(0.7f, 4f, 0.7f), pillarMat, keepCollider: true);
         GameObject pillar = SaveAsPrefab(pillarRoot, folder, "Ward_Pillar");
 
         // FloorTile: slab (the old primitive drain disc is gone - F89).
@@ -722,23 +719,16 @@ public static partial class FloorThemeBuilder
         Material ceilingMat = LoadOrCreateMat(folder, "Boiler_Ceiling", new Color(0.12f, 0.10f, 0.09f), null, null, Vector2.one, null);
         Material ironMat = LoadOrCreateMat(folder, "Boiler_Iron", new Color(0.20f, 0.19f, 0.18f), null, null, Vector2.one, null, smoothness: 0.3f);
         Material rustMat = LoadOrCreateMat(folder, "Boiler_Rust", new Color(0.45f, 0.24f, 0.14f), null, null, Vector2.one, null);
+        Material pillarMat = LoadOrCreateMat(folder, "Boiler_Pillar", new Color(0.42f, 0.30f, 0.24f), null, null, Vector2.one, null); // F90: wall plates at a column's tiling
         Color glassColor = new Color(1.0f, 0.62f, 0.30f);
         Material glassMat = LoadOrCreateMat(folder, "Boiler_Glass", glassColor, null, null, Vector2.one, glassColor * 2.5f);
 
         GameObject wallRoot = new GameObject("Boiler_Wall");
         Box(wallRoot.transform, "Body", new Vector3(0f, 2f, 0f), new Vector3(5f, 4f, 0.5f), wallMat, keepCollider: true);
-        foreach (float rx in new[] { -2f, -1f, 0f, 1f, 2f })
-        {
-            Sphere(wallRoot.transform, "RivetTop", new Vector3(rx, 3.9f, 0.26f), Vector3.one * 0.06f, ironMat);
-            Sphere(wallRoot.transform, "RivetBottom", new Vector3(rx, 0.1f, 0.26f), Vector3.one * 0.06f, ironMat);
-        }
-        CylinderBetween(wallRoot.transform, "Pipe", new Vector3(-2.5f, 3.3f, 0.32f), new Vector3(2.5f, 3.3f, 0.32f), 0.08f, rustMat);
         WallPiece wall = FinishWall(wallRoot, folder);
 
         GameObject pillarRoot = new GameObject("Boiler_Pillar");
-        Box(pillarRoot.transform, "Body", new Vector3(0f, 2f, 0f), new Vector3(0.7f, 4f, 0.7f), ironMat, keepCollider: true);
-        Box(pillarRoot.transform, "FlangeTop", new Vector3(0f, 3.96f, 0f), new Vector3(0.9f, 0.08f, 0.9f), ironMat);
-        Box(pillarRoot.transform, "FlangeBottom", new Vector3(0f, 0.04f, 0f), new Vector3(0.9f, 0.08f, 0.9f), ironMat);
+        Box(pillarRoot.transform, "Body", new Vector3(0f, 2f, 0f), new Vector3(0.7f, 4f, 0.7f), pillarMat, keepCollider: true);
         GameObject pillar = SaveAsPrefab(pillarRoot, folder, "Boiler_Pillar");
 
         GameObject floorRoot = new GameObject("Boiler_FloorTile");
@@ -867,6 +857,7 @@ public static partial class FloorThemeBuilder
         Material floorMat = LoadOrCreateMat(folder, "Lab_Floor", new Color(0.12f, 0.12f, 0.14f), $"{grid}/Grid_01_BaseMap.png", $"{grid}/Grid_01_Normal.png", new Vector2(2f, 2f), null);
         Material ceilingMat = LoadOrCreateMat(folder, "Lab_Ceiling", new Color(0.10f, 0.10f, 0.11f), null, null, Vector2.one, null);
         Material metalMat = LoadOrCreateMat(folder, "Lab_Metal", new Color(0.22f, 0.23f, 0.26f), null, null, Vector2.one, null, smoothness: 0.35f);
+        Material pillarMat = LoadOrCreateMat(folder, "Lab_Pillar", new Color(0.15f, 0.16f, 0.18f), null, null, Vector2.one, null); // F90: wall panels at a column's tiling
         Color glassColor = new Color(1.0f, 0.15f, 0.10f);
         Material glassMat = LoadOrCreateMat(folder, "Lab_Glass", glassColor, null, null, Vector2.one, glassColor * 2.5f);
         Color ledColor = new Color(0.2f, 1.0f, 0.9f);
@@ -875,15 +866,10 @@ public static partial class FloorThemeBuilder
 
         GameObject wallRoot = new GameObject("Lab_Wall");
         Box(wallRoot.transform, "Body", new Vector3(0f, 2f, 0f), new Vector3(5f, 4f, 0.5f), wallMat, keepCollider: true);
-        Box(wallRoot.transform, "CableTray", new Vector3(0f, 3.6f, 0.35f), new Vector3(5f, 0.08f, 0.3f), metalMat);
-        foreach (float cy in new[] { 3.58f, 3.62f, 3.66f })
-            CylinderBetween(wallRoot.transform, "Cable", new Vector3(-2.4f, cy, 0.35f), new Vector3(2.4f, cy, 0.35f), 0.02f, metalMat);
-        Box(wallRoot.transform, "SeamL", new Vector3(-1.25f, 2f, 0.26f), new Vector3(0.02f, 3.6f, 0.53f), metalMat);
-        Box(wallRoot.transform, "SeamR", new Vector3(1.25f, 2f, 0.26f), new Vector3(0.02f, 3.6f, 0.53f), metalMat);
         WallPiece wall = FinishWall(wallRoot, folder);
 
         GameObject pillarRoot = new GameObject("Lab_Pillar");
-        Box(pillarRoot.transform, "Body", new Vector3(0f, 2f, 0f), new Vector3(0.7f, 4f, 0.7f), metalMat, keepCollider: true);
+        Box(pillarRoot.transform, "Body", new Vector3(0f, 2f, 0f), new Vector3(0.7f, 4f, 0.7f), pillarMat, keepCollider: true);
         Box(pillarRoot.transform, "LedStrip", new Vector3(0f, 2f, 0.36f), new Vector3(0.02f, 3.6f, 0.02f), ledMat);
         GameObject pillar = SaveAsPrefab(pillarRoot, folder, "Lab_Pillar");
 

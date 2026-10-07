@@ -2714,6 +2714,19 @@ public class MazeGenerator : MonoBehaviour
         return material;
     }
 
+    private Material _shardModelMaterial;
+
+    /// <summary>F90: the lumpy pack model keeps its form under the torch only if its glow is gentler than the old cube's flat 2.5x emission (which blows a whole lump out to a white silhouette). Shared by every shard of the floor.</summary>
+    private Material ModelShardMaterial(Material glow)
+    {
+        if (_shardModelMaterial != null) return _shardModelMaterial;
+        _shardModelMaterial = new Material(glow) { name = "Maze_ShardModel" };
+        Color baseColor = new Color(0.55f, 0.9f, 1f);
+        _shardModelMaterial.SetColor("_EmissionColor", baseColor * 0.9f);
+        _runtimeMaterials.Add(_shardModelMaterial);
+        return _shardModelMaterial;
+    }
+
     /// <summary>
     /// A shard root sits unscaled at the wall (so its SphereCollider radius means what it says); the
     /// glassy cube it is built from is a scaled child instead of the root itself. Returns the wall
@@ -2767,16 +2780,38 @@ public class MazeGenerator : MonoBehaviour
         root.transform.SetParent(_mazeRoot, false);
         root.transform.position = position;
 
-        GameObject body = GameObject.CreatePrimitive(PrimitiveType.Cube);
-        body.name = "Body";
-        body.layer = 0;
-        body.transform.SetParent(root.transform, false);
-        body.transform.localRotation = Quaternion.Euler(35f, rng.Next(360), 25f);
-        body.transform.localScale = new Vector3(0.16f, 0.5f, 0.16f);
+        // F90: the body is the kit's pack model (InteractableKit.shardModel) when there is one, the old cube otherwise.
+        // Either way exactly one rng.Next(360) is drawn here, so the +5 shard stream is the same as before.
+        GameObject body;
+        float yaw = rng.Next(360);
+        if (interactableKit == null) interactableKit = FindAnyObjectByType<InteractableKit>(FindObjectsInactive.Include);
+        GameObject model = interactableKit != null ? interactableKit.ShardModel : null;
+        if (model != null)
+        {
+            body = Instantiate(model, root.transform);
+            body.name = "Body";
+            body.SetActive(true);
+            body.transform.localPosition = Vector3.zero;
+            body.transform.localRotation = Quaternion.Euler(35f, yaw, 25f);
+            foreach (Collider c in body.GetComponentsInChildren<Collider>(true)) Destroy(c);
+            if (material != null)
+            {
+                foreach (Renderer r in body.GetComponentsInChildren<Renderer>(true)) r.sharedMaterial = ModelShardMaterial(material);
+            }
+        }
+        else
+        {
+            body = GameObject.CreatePrimitive(PrimitiveType.Cube);
+            body.name = "Body";
+            body.layer = 0;
+            body.transform.SetParent(root.transform, false);
+            body.transform.localRotation = Quaternion.Euler(35f, yaw, 25f);
+            body.transform.localScale = new Vector3(0.16f, 0.5f, 0.16f);
 
-        Collider bodyCollider = body.GetComponent<Collider>();
-        if (bodyCollider != null) Destroy(bodyCollider);
-        if (material != null) body.GetComponent<MeshRenderer>().sharedMaterial = material;
+            Collider bodyCollider = body.GetComponent<Collider>();
+            if (bodyCollider != null) Destroy(bodyCollider);
+            if (material != null) body.GetComponent<MeshRenderer>().sharedMaterial = material;
+        }
 
         SphereCollider trigger = root.AddComponent<SphereCollider>();
         trigger.isTrigger = true;

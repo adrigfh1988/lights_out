@@ -65,6 +65,10 @@ public class InteractableKit : MonoBehaviour
     [Tooltip("Optional. The trapdoor MazeEscape.BuildHatch clones: a child 'Glow' renderer takes the hatch's emissive material, and children 'LidL'/'LidR' are the two leaves, hinged about their local Z. Empty = the old glowing slab.")]
     [SerializeField] private GameObject escapeHatch;
 
+    [Header("Shard model (F90)")]
+    [Tooltip("The currency shard's model: a pack item (Alchemist House Bulb01, a lumpy cluster) centred on this object's origin. MazeGenerator.BuildShard clones its children under each shard and gives them the glowing Maze_Shard material; empty = the old primitive cube.")]
+    [SerializeField] private GameObject shardModel;
+
     public MazeDoor ShutterDoor => shutterDoor;
     public WallButton WallButton => wallButton;
     public BatteryCellPickup BatteryCell => batteryCell;
@@ -83,6 +87,7 @@ public class InteractableKit : MonoBehaviour
     public Stalker Stalker => stalker;
     public KeyPickup KeyPickup => keyPickup;
     public GameObject EscapeHatch => escapeHatch;
+    public GameObject ShardModel => shardModel;
 
     /// <summary>True once every F72 template slot is assigned - MazeGenerator.BuildDoors logs and skips the whole feature otherwise.</summary>
     public bool HasDoorsAndButtons => shutterDoor != null && wallButton != null && batteryCell != null;
