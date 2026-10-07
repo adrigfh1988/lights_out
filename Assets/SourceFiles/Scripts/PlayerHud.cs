@@ -36,6 +36,7 @@ public class PlayerHud : MonoBehaviour
     private float _staminaAlpha;
 
     private TextMeshProUGUI _promptText;
+    private TextMeshProUGUI _floorText;
 
     private static readonly Color SubtitleColor = new Color(0.78f, 0.72f, 0.72f);
     private TextMeshProUGUI _subtitleText;
@@ -140,7 +141,9 @@ public class PlayerHud : MonoBehaviour
         const float fadeOut = 0.6f;
         float hold = Mathf.Max(0f, seconds - fadeIn - fadeOut);
 
-        _subtitleText.text = $"<i>{text}</i>";
+        // F86: the maze's dread cues are italic; the Intake's explanations are plain teaching text.
+        _subtitleText.text = text;
+        _subtitleText.fontStyle = GameFlow.IsInIntake ? FontStyles.Normal : FontStyles.Italic;
         _subtitleText.gameObject.SetActive(true);
 
         float t = 0f;
@@ -202,7 +205,7 @@ public class PlayerHud : MonoBehaviour
         _staminaGroup.alpha = 0f;
 
         // Sits under TensionDirector's star counter (top-left, 36 px in, 30 px down, 60 px tall)
-        TextMeshProUGUI floorText = RuntimeUi.CreateText(canvas.transform, "FloorLabel",
+        TextMeshProUGUI floorText = _floorText = RuntimeUi.CreateText(canvas.transform, "FloorLabel",
             $"FLOOR {GameFlow.CurrentFloor}", 26f, new Color(0.62f, 0.62f, 0.66f));
         floorText.alignment = TextAlignmentOptions.TopLeft;
         floorText.characterSpacing = 6f;
@@ -278,6 +281,8 @@ public class PlayerHud : MonoBehaviour
 
     private void Update()
     {
+        // F86: the Intake is not a floor - hide the "FLOOR n" label (the TORCH bar stays, it is taught there).
+        if (_floorText != null) _floorText.gameObject.SetActive(!GameFlow.IsInIntake);
         UpdateBattery();
         UpdateStamina();
         UpdateShardCounter();

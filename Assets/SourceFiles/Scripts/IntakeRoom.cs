@@ -64,6 +64,10 @@ public class IntakeRoom : MonoBehaviour
     [SerializeField] private Transform hatchLidR;
     [SerializeField] private Renderer hatchGlow;
     [SerializeField] private Light hatchLight;
+    [Tooltip("F86 goal arrow: a down-pointing amber chevron that bobs over the current goal target and turns to face the camera.")]
+    [SerializeField] private Transform goalArrow;
+    [Tooltip("F86: one soft pulsing light that sits on the current pickup (battery, bottle, note, star).")]
+    [SerializeField] private Light goalGlow;
 
     [Header("Tuning")]
     [SerializeField] private float humVolume = 0.16f;
@@ -89,8 +93,6 @@ public class IntakeRoom : MonoBehaviour
     private float _cameraBaseLocalY;
 
     private GameObject _uiRoot;
-    private TextMeshProUGUI _instruction;
-    private TextMeshProUGUI[] _rows;
     private Image _blackout;
     private Coroutine _run;
 
@@ -253,7 +255,8 @@ public class IntakeRoom : MonoBehaviour
         if (_reader != null) _reader.Close();
         if (locker != null && locker.Occupied) locker.ForceLeave();
         if (_hud != null) { _hud.SetPrompt(null); _hud.SetFocusPrompt(null); }
-        if (_instruction != null) _instruction.text = "";
+        if (_cardGroup != null) _cardGroup.alpha = 0f;
+        ApplyMarker(default);
         if (_stepSource != null) _stepSource.Stop();
         if (_dragSource != null) _dragSource.Stop();
         PlayerLock.Freeze(_player, true);
@@ -297,10 +300,12 @@ public class IntakeRoom : MonoBehaviour
         yield return Fade(1f, 0f, 1.6f);
         if (_hud != null) _hud.ShowSubtitle(again ? "Welcome back. You know the way - or skip it from the pause menu." : "You wake. The bed is cold. Nobody is here.", 4f);
 
+        Transform moveMarker = transform.Find("MoveMarker");
+
         // 1. Wake up: lying down, looking around, then up.
         Vector3 lastForward = _camera != null ? _camera.transform.forward : Vector3.forward;
         float turned = 0f;
-        yield return Step(0, () => $"LOOK AROUND  -  {TouchInput.Key("MOUSE", "RIGHT THUMB")}", () =>
+        yield return Step(0, () => "LOOK AROUND", () => K(TouchInput.Key("MOUSE", "RIGHT THUMB")), () =>
         {
             if (_camera == null) return true;
             Vector3 f = _camera.transform.forward;
@@ -311,18 +316,19 @@ public class IntakeRoom : MonoBehaviour
         yield return StandUp();
 
         // 2. Move.
-        yield return Step(1, () => $"WALK TO THE MARKER  -  {TouchInput.Key("W A S D", "LEFT THUMB")}", () => InZone(moveZone));
+        yield return Step(1, () => "WALK TO THE MARKER", () => K(TouchInput.Key("WASD", "LEFT THUMB")), () => InZone(moveZone),
+            marker: () => Mk(moveMarker, 0.9f));
 
         // 3. Torch: the lamp dies, the torch is handed over.
         TorchAllowed = true;
         if (_flashlight != null) _flashlight.InputEnabled = true;
         StartCoroutine(SparkOutLamp());
-        yield return Step(2, () => $"THE LIGHTS ARE GOING.  TURN ON YOUR TORCH  -  {TouchInput.Key("F", "TORCH")}", () => _flashlight == null || _flashlight.IsOn);
+        yield return Step(2, () => "TURN ON YOUR TORCH", () => K(TouchInput.Key("F", "TORCH")), () => _flashlight == null || _flashlight.IsOn);
 
         // 4. Focus: the far sign is only legible in the focused beam.
         float seen = 0f;
         if (focusSign != null) SetSignAlpha(0.07f);
-        yield return Step(3, () => $"READ THE SIGN BY THE SHUTTER.  HOLD {TouchInput.Key("RIGHT MOUSE", "FOCUS")} TO NARROW THE BEAM", () =>
+        yield return Step(3, () => "HOLD THE BEAM ON THE SIGN", () => K(TouchInput.Key("RMB", "FOCUS")), () =>
         {
             if (focusSign == null || _flashlight == null || _camera == null) return true;
             Vector3 to = focusSign.transform.position - _camera.transform.position;
@@ -331,29 +337,29 @@ public class IntakeRoom : MonoBehaviour
             seen = aimed ? seen + Time.deltaTime : Mathf.Max(0f, seen - Time.deltaTime * 0.5f);
             SetSignAlpha(Mathf.Lerp(0.07f, 1f, Mathf.Clamp01(seen / 1.2f)));
             return seen >= 1.2f;
-        });
+        }, marker: () => Mk(focusSign != null ? focusSign.transform : null),
+        onStart: () => { if (_hud != null) _hud.ShowSubtitle("The focused beam is narrower and reaches further. Hold it on the sign.", 5f); });
         SetSignAlpha(1f);
 
         // 5. Battery.
         if (_flashlight != null) _flashlight.Drain(Mathf.Max(0f, _flashlight.Charge - 0.3f));
-        yield return Step(4, () => $"YOUR TORCH IS FADING.  TAKE THE BATTERY CELL  -  {TouchInput.Key("E", "USE")}", () => battery == null);
+        yield return Step(4, () => "TAKE THE BATTERY CELL", () => K(TouchInput.Key("E", "USE")), () => battery == null,
+            marker: () => Mk(battery != null ? battery.transform : null, 0.35f, true),
+            onStart: () => { if (_hud != null) _hud.ShowSubtitle("Your torch is fading. A battery cell tops it up.", 4f); });
         if (_hud != null) _hud.ShowSubtitle("Switched off, the torch slowly recharges - but never all the way.", 5f);
 
         // 6. Read.
         bool noteOpened = false;
-        yield return Step(5, () => _reader != null && _reader.IsOpen
-            ? $"CLOSE IT  -  {TouchInput.Key("E", "USE")}"
-            : $"READ THE NOTE ON THE WALL  -  {TouchInput.Key("E", "USE")}", () =>
+        yield return Step(5, () => _reader != null && _reader.IsOpen ? "CLOSE THE NOTE" : "READ THE NOTE", () => K(TouchInput.Key("E", "USE")), () =>
         {
             if (_reader != null && _reader.IsOpen) noteOpened = true;
             return noteOpened && (_reader == null || !_reader.IsOpen);
-        });
+        }, marker: () => _reader != null && _reader.IsOpen ? default : Mk(note != null ? note.transform : null, 0.35f, true));
 
         // 7. Throw.
         float missingFor = 0f;
-        yield return Step(6, () => _throw != null && _throw.Carried > 0
-            ? $"THROW IT AT THE BELL  -  {TouchInput.Key("G", "THROW")}"
-            : $"PICK UP THE BOTTLE  -  {TouchInput.Key("E", "USE")}", () =>
+        yield return Step(6, () => _throw != null && _throw.Carried > 0 ? "THROW IT AT THE BELL" : "PICK UP THE BOTTLE",
+            () => _throw != null && _throw.Carried > 0 ? K(TouchInput.Key("G", "THROW")) : K(TouchInput.Key("E", "USE")), () =>
         {
             if (bell == null) return true;
             // Missed, or the glass broke on the wall: put another bottle on the table.
@@ -365,18 +371,23 @@ public class IntakeRoom : MonoBehaviour
             }
             else missingFor = 0f;
             return bell.Hit;
+        }, marker: () =>
+        {
+            if (_throw != null && _throw.Carried > 0) return Mk(bell != null ? bell.transform : null, 0.55f);
+            return Mk(bottle != null ? bottle.transform : null, 0.35f, true);
         });
         yield return OpenShutter();
 
         // 8. Hide.
-        yield return Step(7, HideText, UpdateHide, onStart: () => ResetHide());
+        yield return Step(7, HideGoal, HideKeys, UpdateHide, marker: () =>
+            (InZone(roomBZone) || _silhouetteActive) && !_silhouettePassed && locker != null && !locker.Occupied
+                ? Mk(locker.transform, 0.35f) : default,
+            onStart: () => ResetHide());
 
         // 9. Stars and the hatch.
         bool starTaken = false;
         SetHatchLook(true);
-        yield return Step(8, () => starTaken
-            ? $"STEP ONTO THE HATCH"
-            : "TAKE THE STAR  -  WALK INTO IT", () =>
+        yield return Step(8, () => starTaken ? "STEP ONTO THE HATCH" : "TAKE THE STAR", () => K(), () =>
         {
             if (!starTaken)
             {
@@ -397,26 +408,108 @@ public class IntakeRoom : MonoBehaviour
                 return false;
             }
             return InZone(hatchZone);
+        }, marker: () =>
+        {
+            if (!starTaken) return Mk(star, 0.45f, true);
+            Vector3 c = hatchZone.bounds.center;
+            Vector3 p = new Vector3(c.x, transform.position.y + 1.1f, c.z);
+            return new Marker { Has = true, Pos = p, Center = p };
         });
 
         StartCoroutine(LeaveRoutine(true));
     }
 
-    /// <summary>Marks the row current, shows the live instruction, waits for done, ticks the row. A beat after each step.</summary>
-    private IEnumerator Step(int index, Func<string> instruction, Func<bool> done, Action onStart = null)
+    // ---------------------------------------------------------------- goals: card + arrow
+
+    private static string[] K(params string[] keys) => keys;
+
+    private struct Marker
     {
-        SetRows(index);
+        public bool Has;
+        /// <summary>Where the arrow floats (before the bob).</summary>
+        public Vector3 Pos;
+        /// <summary>The target's centre, where a pickup's glow sits.</summary>
+        public Vector3 Center;
+        public bool Glow;
+    }
+
+    /// <summary>A marker over a scene object: the arrow floats `lift` above the top of its renderers; glow = a soft pulsing light on it too.</summary>
+    private static Marker Mk(Transform target, float lift = 0.35f, bool glow = false)
+    {
+        if (target == null) return default;
+        Bounds b = new Bounds(target.position, Vector3.zero);
+        bool any = false;
+        foreach (Renderer r in target.GetComponentsInChildren<Renderer>())
+        {
+            if (!any) { b = r.bounds; any = true; }
+            else b.Encapsulate(r.bounds);
+        }
+        return new Marker { Has = true, Center = b.center, Pos = new Vector3(b.center.x, b.max.y + lift, b.center.z), Glow = glow };
+    }
+
+    /// <summary>
+    /// One goal at a time: the objective card fades in, the live goal/keys follow the player's state, the arrow floats over the
+    /// target, and on completion a tick shows for a beat before the card fades out and the next goal comes in.
+    /// </summary>
+    private IEnumerator Step(int index, Func<string> goal, Func<string[]> keys, Func<bool> done, Func<Marker> marker = null, Action onStart = null)
+    {
         onStart?.Invoke();
+        CardSet(index, goal(), keys());
+        yield return CardFade(0f, 1f, 0.3f);
+
         while (true)
         {
-            if (_instruction != null) _instruction.text = instruction();
+            CardLive(goal(), keys());
+            ApplyMarker(marker != null ? marker() : default);
             if (Time.timeScale > 0f && done()) break;
             yield return null;
         }
 
-        MarkRow(index);
-        if (_instruction != null) _instruction.text = "";
-        yield return new WaitForSeconds(0.7f);
+        ApplyMarker(default);
+        yield return CardTick();
+        yield return CardFade(1f, 0f, 0.25f);
+        yield return new WaitForSeconds(0.1f);
+    }
+
+    private void ApplyMarker(Marker m)
+    {
+        if (goalArrow != null)
+        {
+            if (goalArrow.gameObject.activeSelf != m.Has) goalArrow.gameObject.SetActive(m.Has);
+            if (m.Has)
+            {
+                float bob = Mathf.Sin(Time.time * 2f * Mathf.PI * 1.2f) * 0.15f;
+                Vector3 basePos = m.Pos;
+                if (_camera != null)
+                {
+                    // Nudged toward the player so a wall-mounted target (the sign, the note) never swallows one arm of the chevron.
+                    Vector3 flat = _camera.transform.position - basePos;
+                    flat.y = 0f;
+                    // (less when the player is right on top of it, or the chevron fills the screen)
+                    if (flat.sqrMagnitude > 0.01f) basePos += flat.normalized * Mathf.Clamp(flat.magnitude * 0.15f, 0.1f, 0.55f);
+                }
+                goalArrow.position = basePos + Vector3.up * bob;
+                if (_camera != null)
+                {
+                    Vector3 toCamera = _camera.transform.position - goalArrow.position;
+                    // Roughly constant on-screen size: smaller up close, larger across the room.
+                    goalArrow.localScale = Vector3.one * Mathf.Clamp(toCamera.magnitude / 4f, 0.22f, 1.6f);
+                    toCamera.y = 0f;
+                    if (toCamera.sqrMagnitude > 0.001f) goalArrow.rotation = Quaternion.LookRotation(toCamera.normalized, Vector3.up);
+                }
+            }
+        }
+
+        if (goalGlow != null)
+        {
+            bool on = m.Has && m.Glow;
+            if (goalGlow.enabled != on) goalGlow.enabled = on;
+            if (on)
+            {
+                goalGlow.transform.position = m.Center;
+                goalGlow.intensity = 1.5f * (0.65f + 0.35f * Mathf.Sin(Time.time * 3.2f));
+            }
+        }
     }
 
     private IEnumerator StandUp()
@@ -496,18 +589,22 @@ public class IntakeRoom : MonoBehaviour
         _pauseLeft = -1f;
     }
 
-    private string HideText()
+    private string HideGoal()
     {
-        if (!InZone(roomBZone) && !_silhouetteActive)
-        {
-            return "GO THROUGH THE SHUTTER";
-        }
-        if (_silhouettePassed)
-        {
-            return locker != null && locker.Occupied ? $"IT IS GONE.  LEAVE THE LOCKER  -  {TouchInput.Key("E", "USE")}" : "";
-        }
-        if (locker != null && locker.Occupied) return "STAY STILL.  DO NOT MOVE.";
-        return $"SOMETHING IS COMING.  GET IN THE LOCKER  -  {TouchInput.Key("E", "USE")}";
+        if (!InZone(roomBZone) && !_silhouetteActive) return "GO THROUGH THE SHUTTER";
+        bool occupied = locker != null && locker.Occupied;
+        if (_silhouettePassed) return occupied ? "IT IS GONE. LEAVE THE LOCKER" : "";
+        if (occupied) return "STAY STILL";
+        return "HIDE IN THE LOCKER";
+    }
+
+    private string[] HideKeys()
+    {
+        bool occupied = locker != null && locker.Occupied;
+        if (!InZone(roomBZone) && !_silhouetteActive) return K();
+        if (_silhouettePassed) return occupied ? K(TouchInput.Key("E", "USE")) : K();
+        if (occupied) return K();
+        return K(TouchInput.Key("E", "USE"));
     }
 
     /// <summary>
@@ -807,62 +904,203 @@ public class IntakeRoom : MonoBehaviour
         _uiRoot.layer = canvas.gameObject.layer;
         RuntimeUi.Stretch((RectTransform)_uiRoot.transform);
 
-        // The checklist, top-left.
-        GameObject panel = RuntimeUi.CreatePanel(_uiRoot.transform, "Checklist", new Color(0f, 0f, 0f, 0.45f));
-        RuntimeUi.Place(panel.GetComponent<Image>().rectTransform, new Vector2(0f, 1f), new Vector2(500f, -190f), new Vector2(440f, 360f));
-
-        TextMeshProUGUI title = RuntimeUi.CreateText(panel.transform, "Title", "THE INTAKE", 30f, Amber);
-        title.fontStyle = FontStyles.Bold;
-        title.characterSpacing = 6f;
-        RuntimeUi.Place(title.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -28f), new Vector2(420f, 40f));
-
-        _rows = new TextMeshProUGUI[StepNames.Length];
-        for (int i = 0; i < StepNames.Length; i++)
-        {
-            TextMeshProUGUI row = RuntimeUi.CreateText(panel.transform, "Row" + i, "", 24f, Grey);
-            row.alignment = TextAlignmentOptions.Left;
-            RuntimeUi.Place(row.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -66f - 30f * i), new Vector2(400f, 30f));
-            _rows[i] = row;
-        }
-        SetRows(-1);
-
-        // The live instruction, top-centre.
-        _instruction = RuntimeUi.CreateText(_uiRoot.transform, "Instruction", "", 38f, Color.white);
-        _instruction.fontStyle = FontStyles.Bold;
-        _instruction.outlineWidth = 0.2f;
-        _instruction.outlineColor = new Color32(0, 0, 0, 255);
-        RuntimeUi.Place(_instruction.rectTransform, new Vector2(0.5f, 1f), new Vector2(0f, -110f), new Vector2(1500f, 120f));
+        BuildCard();
 
         // Black cover, topmost.
         _blackout = RuntimeUi.CreatePanel(_uiRoot.transform, "IntakeBlackout", Color.black).GetComponent<Image>();
         _blackout.raycastTarget = false;
     }
 
-    private int _current = -1;
-    private readonly bool[] _done = new bool[StepNames.Length];
+    // ---- the objective card: dark translucent card top-centre, amber bar on its left edge, small grey OBJECTIVE label and
+    // step counter, the goal in caps, the keys as bordered key-cap chips, a tick drawn from two bars on completion.
 
-    private void SetRows(int current)
+    private const float CardWidth = 780f;
+    private const float CardHeight = 176f;
+    private const float CardTop = 36f;
+
+    private RectTransform _card;
+    private CanvasGroup _cardGroup;
+    private TextMeshProUGUI _cardGoalText;
+    private TextMeshProUGUI _cardCounter;
+    private RectTransform _chipRow;
+    private GameObject _tick;
+    private string _cardGoal = "";
+    private string _cardKeys = "";
+
+    private static void PlaceTopLeft(RectTransform rect, Vector2 offset, Vector2 size)
     {
-        _current = current;
-        RefreshRows();
+        rect.anchorMin = new Vector2(0f, 1f);
+        rect.anchorMax = new Vector2(0f, 1f);
+        rect.pivot = new Vector2(0f, 1f);
+        rect.anchoredPosition = offset;
+        rect.sizeDelta = size;
     }
 
-    private void MarkRow(int index)
+    private void BuildCard()
     {
-        if (index >= 0 && index < _done.Length) _done[index] = true;
-        RefreshRows();
+        GameObject card = RuntimeUi.CreatePanel(_uiRoot.transform, "ObjectiveCard", new Color(0.02f, 0.02f, 0.03f, 0.6f));
+        card.GetComponent<Image>().raycastTarget = false;
+        _card = card.GetComponent<RectTransform>();
+        _card.anchorMin = _card.anchorMax = new Vector2(0.5f, 1f);
+        _card.pivot = new Vector2(0.5f, 1f);
+        _card.sizeDelta = new Vector2(CardWidth, CardHeight);
+        _card.anchoredPosition = new Vector2(0f, -CardTop);
+        _cardGroup = card.AddComponent<CanvasGroup>();
+        _cardGroup.alpha = 0f;
+        _cardGroup.blocksRaycasts = false;
+        _cardGroup.interactable = false;
+
+        // The thin amber bar on the left edge.
+        GameObject bar = RuntimeUi.CreatePanel(card.transform, "AmberBar", Amber);
+        bar.GetComponent<Image>().raycastTarget = false;
+        RectTransform barRect = bar.GetComponent<RectTransform>();
+        barRect.anchorMin = new Vector2(0f, 0f);
+        barRect.anchorMax = new Vector2(0f, 1f);
+        barRect.pivot = new Vector2(0f, 0.5f);
+        barRect.sizeDelta = new Vector2(6f, 0f);
+        barRect.anchoredPosition = Vector2.zero;
+
+        TextMeshProUGUI label = RuntimeUi.CreateText(card.transform, "Label", "OBJECTIVE", 20f, Grey);
+        label.alignment = TextAlignmentOptions.TopLeft;
+        label.characterSpacing = 6f;
+        PlaceTopLeft(label.rectTransform, new Vector2(30f, -14f), new Vector2(300f, 26f));
+
+        _cardCounter = RuntimeUi.CreateText(card.transform, "Counter", "", 20f, Grey);
+        _cardCounter.alignment = TextAlignmentOptions.TopRight;
+        _cardCounter.characterSpacing = 4f;
+        PlaceTopLeft(_cardCounter.rectTransform, new Vector2(CardWidth - 30f - 160f, -14f), new Vector2(160f, 26f));
+
+        _cardGoalText = RuntimeUi.CreateText(card.transform, "Goal", "", 42f, Color.white);
+        _cardGoalText.alignment = TextAlignmentOptions.TopLeft;
+        _cardGoalText.fontStyle = FontStyles.Bold;
+        _cardGoalText.characterSpacing = 3f;
+        _cardGoalText.textWrappingMode = TextWrappingModes.NoWrap;
+        // Long goals shrink rather than run under the tick.
+        _cardGoalText.enableAutoSizing = true;
+        _cardGoalText.fontSizeMin = 26f;
+        _cardGoalText.fontSizeMax = 42f;
+        PlaceTopLeft(_cardGoalText.rectTransform, new Vector2(30f, -46f), new Vector2(CardWidth - 130f, 56f));
+
+        GameObject row = new GameObject("Chips", typeof(RectTransform));
+        row.transform.SetParent(card.transform, false);
+        row.layer = card.layer;
+        _chipRow = (RectTransform)row.transform;
+        PlaceTopLeft(_chipRow, new Vector2(30f, -112f), new Vector2(CardWidth - 60f, 46f));
+
+        // The tick: two bars forming a check mark, at the right of the goal.
+        _tick = new GameObject("Tick", typeof(RectTransform));
+        _tick.transform.SetParent(card.transform, false);
+        _tick.layer = card.layer;
+        RectTransform tickRect = (RectTransform)_tick.transform;
+        tickRect.anchorMin = tickRect.anchorMax = new Vector2(1f, 0.5f);
+        tickRect.pivot = new Vector2(0.5f, 0.5f);
+        tickRect.anchoredPosition = new Vector2(-60f, -4f);
+        tickRect.sizeDelta = new Vector2(60f, 60f);
+        MakeTickBar(_tick.transform, new Vector2(-12f, -6f), new Vector2(8f, 22f), 45f);
+        MakeTickBar(_tick.transform, new Vector2(7f, 2f), new Vector2(8f, 44f), -45f);
+        _tick.SetActive(false);
     }
 
-    private void RefreshRows()
+    private static void MakeTickBar(Transform parent, Vector2 position, Vector2 size, float zRotation)
     {
-        if (_rows == null) return;
-        for (int i = 0; i < _rows.Length; i++)
+        GameObject bar = new GameObject("Bar", typeof(RectTransform), typeof(Image));
+        bar.transform.SetParent(parent, false);
+        bar.layer = parent.gameObject.layer;
+        Image image = bar.GetComponent<Image>();
+        image.color = Green;
+        image.raycastTarget = false;
+        RectTransform rect = (RectTransform)bar.transform;
+        rect.anchorMin = rect.anchorMax = new Vector2(0.5f, 0.5f);
+        rect.pivot = new Vector2(0.5f, 0.5f);
+        rect.anchoredPosition = position;
+        rect.sizeDelta = size;
+        rect.localRotation = Quaternion.Euler(0f, 0f, zRotation);
+    }
+
+    /// <summary>A new goal: text, counter and chips set instantly (the card is invisible between goals).</summary>
+    private void CardSet(int index, string goal, string[] keys)
+    {
+        if (_card == null) return;
+        _cardCounter.text = $"{index + 1} / {StepNames.Length}";
+        _tick.SetActive(false);
+        _cardGoal = null;
+        _cardKeys = null;
+        CardLive(goal, keys);
+    }
+
+    /// <summary>The goal or its keys can change mid-step (pick up the bottle, then throw it; touch mode switching on): only rebuild on a change.</summary>
+    private void CardLive(string goal, string[] keys)
+    {
+        if (_card == null) return;
+        if (goal != _cardGoal)
         {
-            if (_rows[i] == null) continue;
-            string box = _done[i] ? "[x]" : "[  ]";
-            _rows[i].text = $"{box}  {StepNames[i]}";
-            _rows[i].color = _done[i] ? Green : (i == _current ? Color.white : new Color(Grey.r, Grey.g, Grey.b, 0.6f));
+            _cardGoal = goal;
+            _cardGoalText.text = goal;
         }
+
+        string joined = string.Join("|", keys ?? new string[0]);
+        if (joined == _cardKeys) return;
+        _cardKeys = joined;
+
+        for (int i = _chipRow.childCount - 1; i >= 0; i--) Destroy(_chipRow.GetChild(i).gameObject);
+        float x = 0f;
+        foreach (string key in keys ?? new string[0])
+        {
+            float width = Mathf.Max(56f, 26f + key.Length * 17f);
+            BuildChip(key, x, width);
+            x += width + 14f;
+        }
+    }
+
+    private void BuildChip(string key, float x, float width)
+    {
+        // A bordered box: an amber frame with a dark face inset by 2 px.
+        GameObject frame = new GameObject("Chip_" + key, typeof(RectTransform), typeof(Image));
+        frame.transform.SetParent(_chipRow, false);
+        frame.layer = _chipRow.gameObject.layer;
+        Image frameImage = frame.GetComponent<Image>();
+        frameImage.color = new Color(Amber.r, Amber.g, Amber.b, 0.95f);
+        frameImage.raycastTarget = false;
+        PlaceTopLeft((RectTransform)frame.transform, new Vector2(x, 0f), new Vector2(width, 44f));
+
+        GameObject face = RuntimeUi.CreatePanel(frame.transform, "Face", new Color(0.07f, 0.07f, 0.08f, 1f));
+        face.GetComponent<Image>().raycastTarget = false;
+        RectTransform faceRect = face.GetComponent<RectTransform>();
+        faceRect.offsetMin = new Vector2(2f, 2f);
+        faceRect.offsetMax = new Vector2(-2f, -2f);
+
+        TextMeshProUGUI text = RuntimeUi.CreateText(face.transform, "Key", key, 24f, Color.white);
+        text.fontStyle = FontStyles.Bold;
+        text.characterSpacing = 2f;
+        text.textWrappingMode = TextWrappingModes.NoWrap;
+        RuntimeUi.Stretch(text.rectTransform);
+    }
+
+    /// <summary>Fades the card (and slides it 20 px down into place on the way in).</summary>
+    private IEnumerator CardFade(float from, float to, float seconds)
+    {
+        if (_cardGroup == null) yield break;
+        float t = 0f;
+        while (t < seconds)
+        {
+            t += Time.unscaledDeltaTime;
+            SetCardAlpha(Mathf.Lerp(from, to, Mathf.SmoothStep(0f, 1f, Mathf.Clamp01(t / seconds))));
+            yield return null;
+        }
+        SetCardAlpha(to);
+    }
+
+    private void SetCardAlpha(float alpha)
+    {
+        _cardGroup.alpha = alpha;
+        _card.anchoredPosition = new Vector2(0f, -CardTop + 20f * (1f - alpha));
+    }
+
+    /// <summary>Goal done: the tick shows for about 0.4 s.</summary>
+    private IEnumerator CardTick()
+    {
+        if (_tick != null) _tick.SetActive(true);
+        yield return new WaitForSecondsRealtime(0.4f);
     }
 }
 

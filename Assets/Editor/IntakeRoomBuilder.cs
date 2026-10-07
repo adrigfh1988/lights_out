@@ -38,7 +38,7 @@ public static class IntakeRoomBuilder
 
     private struct Mats
     {
-        public Material Wall, Floor, Ceiling, Metal, Brass, Marker, Lamp, Black, Eyes;
+        public Material Wall, Floor, Ceiling, Metal, Brass, Marker, Lamp, Black, Eyes, Arrow;
     }
 
     private static Transform _root;
@@ -213,6 +213,11 @@ public static class IntakeRoomBuilder
         Transform r2 = Point(routeGroup, "End", new Vector3(3.3f, 0f, 11.2f), 0f);
         Transform silhouette = BuildSilhouette(m, r0.localPosition);
 
+        // ---- goal arrow and glow (IntakeRoom moves them; hidden until a goal has a target)
+        Transform goalArrow = BuildGoalArrow(m);
+        Light goalGlow = PointLight(lights, "GoalGlow", new Vector3(0f, 1f, 0f), new Color(1f, 0.78f, 0.35f), 1.6f, 1.5f);
+        goalGlow.enabled = false;
+
         // ---- wire the component
         IntakeRoom room = rootGo.AddComponent<IntakeRoom>();
         SerializedObject so = new SerializedObject(room);
@@ -244,6 +249,8 @@ public static class IntakeRoomBuilder
         Wire(so, "hatchLidR", lidR);
         Wire(so, "hatchGlow", glow);
         Wire(so, "hatchLight", hatchLight);
+        Wire(so, "goalArrow", goalArrow);
+        Wire(so, "goalGlow", goalGlow);
         so.ApplyModifiedPropertiesWithoutUndo();
 
         Selection.activeGameObject = rootGo;
@@ -410,6 +417,23 @@ public static class IntakeRoomBuilder
         star.transform.localPosition = top;
         PointLight(star.transform, "StarLight", Vector3.zero, new Color(1f, 0.9f, 0.4f), 5f, 1.2f);
         return star.transform;
+    }
+
+    /// <summary>
+    /// A down-pointing chevron: two unlit amber bars meeting at the bottom, the same bright amber as the objective card.
+    /// Its origin is the tip; IntakeRoom floats it over the goal's target, bobs it and turns it to face the camera.
+    /// </summary>
+    private static Transform BuildGoalArrow(Mats m)
+    {
+        Transform arrow = Group(_root, "GoalArrow");
+        foreach (float side in new[] { -1f, 1f })
+        {
+            GameObject arm = Prim(arrow, PrimitiveType.Cube, side < 0f ? "ArmL" : "ArmR", new Vector3(side * 0.19f, 0.16f, 0f), new Vector3(0.5f, 0.1f, 0.1f), m.Arrow);
+            arm.transform.localRotation = Quaternion.Euler(0f, 0f, side * 40f);
+            arm.GetComponent<MeshRenderer>().shadowCastingMode = UnityEngine.Rendering.ShadowCastingMode.Off;
+        }
+        arrow.gameObject.SetActive(false);
+        return arrow;
     }
 
     private static Transform BuildSilhouette(Mats m, Vector3 localPosition)
@@ -659,9 +683,27 @@ public static class IntakeRoomBuilder
             Lamp = LoadOrCreate("Intake_Lamp", new Color(1f, 0.9f, 0.7f), new Color(1f, 0.85f, 0.6f) * 2.2f, 0.1f),
             Black = LoadOrCreate("Intake_Silhouette", new Color(0.01f, 0.01f, 0.012f), null, 0.0f),
             Eyes = LoadOrCreate("Intake_Eyes", new Color(1f, 0.1f, 0.05f), new Color(1f, 0.1f, 0.05f) * 5f, 0.1f),
+            Arrow = LoadOrCreateUnlit("Intake_Arrow", new Color(1f, 0.72f, 0.1f)),
         };
         AssetDatabase.SaveAssets();
         return m;
+    }
+
+    /// <summary>An unlit material: the goal arrow must read in the dark, and nothing may shade it.</summary>
+    private static Material LoadOrCreateUnlit(string name, Color color)
+    {
+        string path = $"{MaterialFolder}/{name}.mat";
+        Material existing = AssetDatabase.LoadAssetAtPath<Material>(path);
+        if (existing != null) return existing;
+
+        Shader shader = Shader.Find("Universal Render Pipeline/Unlit");
+        if (shader == null) return LoadOrCreate(name, color, color * 3f, 0f);
+
+        Material material = new Material(shader) { name = name };
+        if (material.HasProperty("_BaseColor")) material.SetColor("_BaseColor", color);
+        if (material.HasProperty("_Color")) material.SetColor("_Color", color);
+        AssetDatabase.CreateAsset(material, path);
+        return material;
     }
 
     private static Material LoadOrCreate(string name, Color color, Color? emission, float smoothness)
