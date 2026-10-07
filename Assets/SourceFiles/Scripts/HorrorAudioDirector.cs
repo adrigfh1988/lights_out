@@ -65,8 +65,8 @@ public class HorrorAudioDirector : MonoBehaviour
     [Header("Panic")]
     [Tooltip("Played on a loop once the hatch opens")]
     [SerializeField] private AudioClip panicClip;
-    [Tooltip("The Urge to Kill is ~2.8x louder than the old Music_Exciting (0.35 then); 0.2 sits just above the base music at its peak.")]
-    [SerializeField] private float panicVolume = 0.2f;
+    [Tooltip("The escape track (The Urge to Kill). 0.5 puts it ~2.5x the base music at its peak, a clear lift when the hatch opens; its peaks (0.92) stay under clipping. 0.2 was too quiet in play (7 Oct 2026).")]
+    [SerializeField] private float panicVolume = 0.5f;
     [Tooltip("1 for a track written as horror (The Urge to Kill, since 7 Oct 2026). The old Music_Exciting placeholder needed 0.78: at native pitch it read as a victory fanfare.")]
     [SerializeField] private float panicPitch = 1f;
 
