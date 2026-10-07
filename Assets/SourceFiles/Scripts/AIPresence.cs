@@ -22,6 +22,8 @@ public class AIPresence : MonoBehaviour
     [SerializeField] private float footstepMaxDistance = 25f;
 
     [Header("Hum")]
+    [Tooltip("Off since 7 Oct 2026: the run's sound is the floor's base music plus the heartbeat, and the hum muddied it. Footsteps are unaffected.")]
+    [SerializeField] private bool playHum = false;
     [SerializeField] private AudioClip humClip;
     [Tooltip("Use the synthesised stone-choir loop instead of humClip")]
     [SerializeField] private bool useChoirHum = true;
@@ -86,7 +88,7 @@ public class AIPresence : MonoBehaviour
     {
         // The scene's sci-fi loop, pitched down, read as radio static. The hunter gets a
         // synthesised stone choir instead; the scene clip is only a fallback if that is switched off.
-        if (useChoirHum || humClip != null)
+        if (playHum && (useChoirHum || humClip != null))
         {
             _humSource.clip = useChoirHum ? AngelAudio.BuildChoirLoop() : humClip;
             _humSource.pitch = useChoirHum ? 1f : humPitch;

@@ -32,10 +32,21 @@ public class HorrorAudioDirector : MonoBehaviour
     [Tooltip("The clip to hand may be a minutes-long loop, so the sting is cut off after this many seconds")]
     [SerializeField] private float stingDuration = 1.5f;
 
+    [Header("Spotted")]
+    [Tooltip("Played whole when the hunter starts a chase (Violin Stabs). Empty = the synthesised sting above, cut to Sting Duration.")]
+    [SerializeField] private AudioClip spottedClip;
+    [SerializeField] private float spottedVolume = 0.6f;
+    [Tooltip("Seconds before the spotted cue may play again - the hunter can lose and regain a chase in a few seconds")]
+    [SerializeField] private float spottedCooldown = 10f;
+
     [Header("Drone")]
     [SerializeField] private AudioClip droneClip;
     [SerializeField] private float dronePitch = 0.6f;
     [SerializeField] private float droneVolume = 0.1f;
+    [Tooltip("Drone volume when the bed is a composed base-music track (Bind's droneIsMusic). Set by ear for the PSX pack, whose loops are ~1.4x louder than Music_Suspenseful.")]
+    [SerializeField] private float musicVolume = 0.15f;
+    [Tooltip("The base music's volume at full progress (it swells, never re-pitches)")]
+    [SerializeField] private float musicVolumeAtPeak = 0.3f;
 
     [Header("Escalation")]
     [Tooltip("How much louder the drone gets at full progress")]
@@ -54,9 +65,10 @@ public class HorrorAudioDirector : MonoBehaviour
     [Header("Panic")]
     [Tooltip("Played on a loop once the hatch opens")]
     [SerializeField] private AudioClip panicClip;
-    [SerializeField] private float panicVolume = 0.35f;
-    [Tooltip("Music_Exciting at native pitch reads as a victory fanfare. Dropped, it reads as panic.")]
-    [SerializeField] private float panicPitch = 0.78f;
+    [Tooltip("The Urge to Kill is ~2.8x louder than the old Music_Exciting (0.35 then); 0.2 sits just above the base music at its peak.")]
+    [SerializeField] private float panicVolume = 0.2f;
+    [Tooltip("1 for a track written as horror (The Urge to Kill, since 7 Oct 2026). The old Music_Exciting placeholder needed 0.78: at native pitch it read as a victory fanfare.")]
+    [SerializeField] private float panicPitch = 1f;
 
     private Transform _player;
     private Transform _hunter;
@@ -64,6 +76,8 @@ public class HorrorAudioDirector : MonoBehaviour
 
     private AudioSource _oneShots;
     private AudioSource _sting;
+    private float _nextSpottedTime;
+    private bool _bedWaitingForRun;
     private AudioSource _drone;
     private AudioSource _whisper;
     private AudioClip _heartbeat;
@@ -74,9 +88,22 @@ public class HorrorAudioDirector : MonoBehaviour
     private bool _panicking;
     private Coroutine _holdBreathRoutine;
 
-    /// <summary>Wired by MazeGenerator, which already knows about both actors.</summary>
-    public void Bind(Transform player, AIFollower follower, AudioClip sting, AudioClip drone, AudioClip panic)
+    /// <summary>
+    /// Wired by MazeGenerator, which already knows about both actors. droneIsMusic: the bed is a composed track (the
+    /// floor's base music) rather than a clip slowed into a drone - it plays at its own pitch, and escalation only
+    /// makes it louder, because pitching music up and down detunes it.
+    /// </summary>
+    public void Bind(Transform player, AIFollower follower, AudioClip sting, AudioClip drone, AudioClip panic, bool droneIsMusic = false, AudioClip spotted = null)
     {
+        if (spotted != null) spottedClip = spotted;
+        if (droneIsMusic)
+        {
+            dronePitch = 1f;
+            dronePitchAtPeak = 1f;
+            droneVolume = musicVolume;
+            droneVolumeAtPeak = musicVolumeAtPeak;
+        }
+
         _player = player;
         _follower = follower;
         if (follower != null) _hunter = follower.transform;
@@ -186,7 +213,9 @@ public class HorrorAudioDirector : MonoBehaviour
             _drone.clip = droneClip;
             _drone.pitch = dronePitch;
             _drone.volume = droneVolume;
-            _drone.Play();
+            // Behind the title screen the menu has its own music: the bed waits for the run (see Update).
+            if (GameFlow.IsRunActive) _drone.Play();
+            else _bedWaitingForRun = true;
         }
     }
 
@@ -200,6 +229,12 @@ public class HorrorAudioDirector : MonoBehaviour
 
     private void Update()
     {
+        if (_bedWaitingForRun && GameFlow.IsRunActive)
+        {
+            _bedWaitingForRun = false;
+            if (_drone != null && !_panicking) _drone.Play();
+        }
+
         if (_player == null || _hunter == null) return;
 
         // The heartbeat carries further as the maze empties out
@@ -231,7 +266,24 @@ public class HorrorAudioDirector : MonoBehaviour
 
     private void HandleChaseStateChanged(bool chasing)
     {
-        if (!chasing || stingClip == null) return;
+        if (!chasing) return;
+
+        // A real "spotted" cue (Violin Stabs) plays whole, at its own pitch, no more than once per spottedCooldown -
+        // the hunter can drop and regain a chase within seconds, and a stab on every flicker turns into noise.
+        if (spottedClip != null)
+        {
+            if (Time.time < _nextSpottedTime) return;
+            _nextSpottedTime = Time.time + spottedCooldown;
+            _sting.clip = spottedClip;
+            _sting.pitch = 1f;
+            _sting.volume = spottedVolume;
+            _sting.Play();
+            // Same source as the capture sting, which schedules a cut-off - replace it with this clip's own end.
+            _sting.SetScheduledEndTime(AudioSettings.dspTime + spottedClip.length + 0.1);
+            return;
+        }
+
+        if (stingClip == null) return;
 
         _sting.clip = stingClip;
         _sting.pitch = stingPitch;

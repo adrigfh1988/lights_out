@@ -55,3 +55,19 @@ desktop.ini
 
 # Local planning docs
 /plannings/
+
+# Music packs: only the tracks the game references are committed. The rest stay on disk to audition,
+# out of the repo (~300 MB of WAVs). To use another track, add a "!" line for it and its .meta.
+/Assets/Free Horror Music/*
+!/Assets/Free Horror Music/VIOLIN STABS.wav
+!/Assets/Free Horror Music/VIOLIN STABS.wav.meta
+!/Assets/Free Horror Music/DISCOVERING ROOMS .wav
+!/Assets/Free Horror Music/DISCOVERING ROOMS .wav.meta
+/Assets/Horror_Music_Pack_Starter_Kit/*
+!/Assets/Horror_Music_Pack_Starter_Kit/WAV_LIGHT_TENSION_LOOP_The_Urge_to_Kill.wav
+!/Assets/Horror_Music_Pack_Starter_Kit/WAV_LIGHT_TENSION_LOOP_The_Urge_to_Kill.wav.meta
+/Assets/PSX Horror Music Pack Vol 1 - Exploration/*
+!/Assets/PSX Horror Music Pack Vol 1 - Exploration/PSX Below Ground.wav
+!/Assets/PSX Horror Music Pack Vol 1 - Exploration/PSX Below Ground.wav.meta
+!/Assets/PSX Horror Music Pack Vol 1 - Exploration/PSX_Horror_Exploration_Free_README.txt
+!/Assets/PSX Horror Music Pack Vol 1 - Exploration/PSX_Horror_Exploration_Free_README.txt.meta

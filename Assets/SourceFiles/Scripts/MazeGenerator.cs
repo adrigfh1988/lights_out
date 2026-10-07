@@ -67,12 +67,18 @@ public class MazeGenerator : MonoBehaviour
     [SerializeField] private bool escapeSequence = true;
     [Tooltip("Title screen and rules screen, with the game held frozen until Start is pressed")]
     [SerializeField] private bool mainMenu = true;
-    [Tooltip("Looping bed, e.g. SFX_AmbienceClose")]
+    [Tooltip("Looping bed, e.g. SFX_AmbienceClose. Only used (pitched down into a drone) when Base Music is empty.")]
     [SerializeField] private AudioClip droneClip;
+    [Tooltip("Base music: each floor loops one of these at its own pitch, picked from the seed (a Retry keeps it). Empty = the Drone Clip above.")]
+    [SerializeField] private AudioClip[] baseMusic;
     [Tooltip("One-shot fired when the hunter spots you")]
     [SerializeField] private AudioClip stingClip;
     [Tooltip("Looping track for the escape, e.g. Music_Exciting")]
     [SerializeField] private AudioClip panicClip;
+    [Tooltip("Played whole when the hunter spots you and starts a chase (Violin Stabs). Empty = the synthesised sting.")]
+    [SerializeField] private AudioClip spottedClip;
+    [Tooltip("Looping track under the title and rules screens (Discovering Rooms); fades out on START.")]
+    [SerializeField] private AudioClip menuMusic;
 
     [Header("Actors")]
     [SerializeField] private NavMeshSurface navMeshSurface;
@@ -4425,7 +4431,8 @@ public class MazeGenerator : MonoBehaviour
         HorrorAudioDirector director = FindAnyObjectByType<HorrorAudioDirector>();
         if (director == null) director = gameObject.AddComponent<HorrorAudioDirector>();
 
-        director.Bind(FindPlayer(), aiFollower, stingClip, droneClip, panicClip);
+        AudioClip music = PickBaseMusic();
+        director.Bind(FindPlayer(), aiFollower, stingClip, music != null ? music : droneClip, panicClip, droneIsMusic: music != null, spotted: spottedClip);
 
         TensionDirector tension = FindAnyObjectByType<TensionDirector>();
         if (tension == null) tension = gameObject.AddComponent<TensionDirector>();
@@ -4629,7 +4636,7 @@ public class MazeGenerator : MonoBehaviour
             menu = FindAnyObjectByType<MainMenu>();
             if (menu == null) menu = gameObject.AddComponent<MainMenu>();
 
-            menu.Configure(player);
+            menu.Configure(player, menuMusic);
         }
         else
         {
@@ -4759,6 +4766,18 @@ public class MazeGenerator : MonoBehaviour
             int j = rng.Next(i + 1);
             (list[i], list[j]) = (list[j], list[i]);
         }
+    }
+
+    /// <summary>One of baseMusic for this floor, from the seed (a Retry of the same maze keeps it), or null if none are set.</summary>
+    private AudioClip PickBaseMusic()
+    {
+        if (baseMusic == null || baseMusic.Length == 0) return null;
+        // Salted ("MUSI") so it is its own draw, independent of RunRules' and the objective roll's.
+        int hash = RunRules.HashSeedFloor(UsedSeed ^ unchecked((int)0x4D555349), GameFlow.CurrentFloor);
+        int index = ((hash % baseMusic.Length) + baseMusic.Length) % baseMusic.Length;
+        if (baseMusic[index] != null) return baseMusic[index];
+        foreach (AudioClip clip in baseMusic) if (clip != null) return clip;
+        return null;
     }
 
     private static Transform FindPlayer()

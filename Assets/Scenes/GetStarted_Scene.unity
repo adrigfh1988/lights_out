@@ -58311,8 +58311,12 @@ MonoBehaviour:
   escapeSequence: 1
   mainMenu: 1
   droneClip: {fileID: 8300000, guid: 2e82ca7b47ede46d486139d8d9c9059d, type: 3}
+  baseMusic:
+  - {fileID: 8300000, guid: 78f968bc5df2323498236956f5cb1d2a, type: 3}
   stingClip: {fileID: 8300000, guid: 2e82ca7b47ede46d486139d8d9c9059d, type: 3}
-  panicClip: {fileID: 8300000, guid: eacade5c242bd4e0db8d0ff9d7e8a6b6, type: 3}
+  panicClip: {fileID: 8300000, guid: 431c66e74656e224fad4d37b8fdcdb4c, type: 3}
+  spottedClip: {fileID: 8300000, guid: 24852e1b979154910a0a491733763849, type: 3}
+  menuMusic: {fileID: 8300000, guid: 6a1272670408f426e9a8f7cf91cc0113, type: 3}
   navMeshSurface: {fileID: 114818787}
   aiFollower: {fileID: 461847994690786}
   disablePlayerJump: 1
@@ -65583,6 +65587,7 @@ MonoBehaviour:
   m_Name: 
   m_EditorClassIdentifier: Assembly-CSharp::HunterVoice
   minGapSeconds: 5
+  playBlips: 0
   blipVolume: 0.35
   nodDegrees: 4
   nodSeconds: 0.1

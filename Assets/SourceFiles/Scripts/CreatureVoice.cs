@@ -20,6 +20,8 @@ public abstract class CreatureVoice : MonoBehaviour
     [SerializeField] protected float minGapSeconds = 5f;
 
     [Header("Voice")]
+    [Tooltip("Per-letter voice blips. Off since 7 Oct 2026 - the bubbles speak silently; the nod and eye flare still play.")]
+    [SerializeField] protected bool playBlips = false;
     [SerializeField] protected float blipVolume = 0.35f;
     [SerializeField] protected float nodDegrees = 4f;
     [SerializeField] protected float nodSeconds = 0.1f;
@@ -222,7 +224,7 @@ public abstract class CreatureVoice : MonoBehaviour
     {
         _nod = 1f;
         _flare = 1f;
-        if (_blipSource == null || _blipClips == null || _blipClips.Length == 0) return;
+        if (!playBlips || _blipSource == null || _blipClips == null || _blipClips.Length == 0) return;
         Vector2 range = BlipPitchRange;
         _blipSource.pitch = Random.Range(range.x, range.y) * (_currentShout ? 0.7f : 1f);
         _blipSource.PlayOneShot(_blipClips[Random.Range(0, _blipClips.Length)], blipVolume);

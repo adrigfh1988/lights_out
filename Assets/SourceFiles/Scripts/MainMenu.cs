@@ -36,11 +36,22 @@ public class MainMenu : MonoBehaviour
     private Transform _player;
     private bool _menuOpen = true;
 
+    [Header("Music")]
+    [Tooltip("Volume of the title music (Discovering Rooms)")]
+    [SerializeField] private float musicVolume = 0.3f;
+    [Tooltip("Seconds the title music takes to fade out once the run starts (real time - the clock is frozen behind the menu)")]
+    [SerializeField] private float musicFadeSeconds = 1.2f;
+
+    private AudioClip _musicClip;
+    private AudioSource _music;
+    private bool _musicFading;
+
     /// <summary>True while the title or rules screen is up. The pause menu stays out of the way.</summary>
     public bool IsOpen => _menuOpen;
 
-    public void Configure(Transform player)
+    public void Configure(Transform player, AudioClip music = null)
     {
+        _musicClip = music;
         if (player == null) return;
         _player = player;
 
@@ -89,7 +100,24 @@ public class MainMenu : MonoBehaviour
             }
 
             StartGame();
+            return;
         }
+
+        PlayMenuMusic();
+    }
+
+    /// <summary>The title music, only when the title screen is actually shown (a retry or CONTINUE skips it).</summary>
+    private void PlayMenuMusic()
+    {
+        if (_musicClip == null) return;
+
+        _music = gameObject.AddComponent<AudioSource>();
+        _music.playOnAwake = false;
+        _music.loop = true;
+        _music.spatialBlend = 0f;
+        _music.clip = _musicClip;
+        _music.volume = musicVolume;
+        _music.Play();
     }
 
     private void OnDestroy()
@@ -103,6 +131,19 @@ public class MainMenu : MonoBehaviour
 
     private void Update()
     {
+        if (_musicFading && _music != null)
+        {
+            // Unscaled: CloseMenus restores the clock, but the fade must not depend on it.
+            // Clamped step: one long hitch (a loading frame) must not swallow the whole fade.
+            float step = Mathf.Min(Time.unscaledDeltaTime, 0.1f);
+            _music.volume = Mathf.MoveTowards(_music.volume, 0f, musicVolume / Mathf.Max(0.01f, musicFadeSeconds) * step);
+            if (_music.volume <= 0f)
+            {
+                _music.Stop();
+                _musicFading = false;
+            }
+        }
+
         if (!_menuOpen) return;
 
         // Held every frame rather than set once: StarterAssetsInputs re-locks the cursor on every
@@ -136,6 +177,7 @@ public class MainMenu : MonoBehaviour
     private void CloseMenus()
     {
         TouchInput.Poll();
+        _musicFading = _music != null && _music.isPlaying;
 
         // F76 T8: a fullscreen request needs a user gesture on the web, and this tap is one. iPhone
         // Safari does not support it at all - ignore failure either way, nothing here depends on it.
