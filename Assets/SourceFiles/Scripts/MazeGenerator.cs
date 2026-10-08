@@ -4706,16 +4706,16 @@ public class MazeGenerator : MonoBehaviour
         if (shop != null) shop.Configure(player, hud, shopMenu);
 
         // F86: the Intake - the playable tutorial START GAME opens before floor 1. Authored in the scene like the shop
-        // (LIGHTS OUT > Build > Intake Room); without it START GAME falls back to the old rules screen.
+        // (Assets/Prefabs/IntakeRoom.prefab; LIGHTS OUT > Check Project); without it START GAME falls back to the old rules screen.
         IntakeRoom intake = FindAnyObjectByType<IntakeRoom>(FindObjectsInactive.Include);
         if (intake != null && !intake.IsComplete)
         {
-            Debug.LogError("MazeGenerator: the IntakeRoom in the scene is incomplete. Run LIGHTS OUT > Build > Intake Room in the Editor.", intake);
+            Debug.LogError("MazeGenerator: the IntakeRoom in the scene is incomplete. Fix Assets/Prefabs/IntakeRoom.prefab, or run LIGHTS OUT > Check Project in the Editor.", intake);
             intake = null;
         }
         else if (intake == null && mainMenu)
         {
-            Debug.LogError("MazeGenerator: there is no IntakeRoom in the scene, so START GAME shows the rules screen instead of the tutorial. Run LIGHTS OUT > Build > Intake Room in the Editor, then save the scene.", this);
+            Debug.LogError("MazeGenerator: there is no IntakeRoom in the scene, so START GAME shows the rules screen instead of the tutorial. Run LIGHTS OUT > Build Missing Pieces in the Editor (it places Assets/Prefabs/IntakeRoom.prefab), then save the scene.", this);
         }
         if (intake != null) intake.Configure(player, camera, hud, flashlight, stealth, interactor, throwController, loreReader);
 

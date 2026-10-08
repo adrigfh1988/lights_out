@@ -185,12 +185,16 @@ public static class ProjectSetup
         new Piece
         {
             Name = "Intake room (F86 tutorial)",
-            FixMenu = "Build > Intake Room",
+            FixMenu = "Build Missing Pieces (places Assets/Prefabs/IntakeRoom.prefab, or saves the scene room as it)",
             Problem = IntakeRoomBuilder.Problem,
-            Build = () =>
-            {
-                if (Object.FindAnyObjectByType<IntakeRoom>(FindObjectsInactive.Include) == null) IntakeRoomBuilder.BuildSilently();
-            }
+            Build = IntakeRoomBuilder.Repair
+        },
+        new Piece
+        {
+            Name = "Intake room layout (lights, walking paths, walls)",
+            FixMenu = "edit Assets/Prefabs/IntakeRoom.prefab by hand to clear what is listed",
+            Problem = IntakeRoomBuilder.LayoutProblem,
+            Build = null
         },
         new Piece
         {

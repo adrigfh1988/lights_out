@@ -20,7 +20,7 @@ using UnityEngine.SceneManagement;
 /// gallery (-70, 5, -6) and the KitMazeTheme (-70, 5, 10), and outside the maze's NavMeshSurface volume.
 /// Rebuilding replaces the existing room. Spec: plannings/intake-and-contracts-plan.md.
 /// </summary>
-public static class IntakeRoomBuilder
+public static partial class IntakeRoomBuilder
 {
     private const string RoomName = "IntakeRoom";
     private const string MaterialFolder = "Assets/SourceFiles/Materials/Intake";
@@ -43,15 +43,41 @@ public static class IntakeRoomBuilder
 
     private static Transform _root;
 
-    /// <summary>True when the scene has an IntakeRoom with every part the component needs. Used by ProjectSetup.</summary>
+    /// <summary>Null when the scene has the IntakeRoom prefab with every part the component needs. Used by ProjectSetup.</summary>
     public static string Problem()
     {
         IntakeRoom room = Object.FindAnyObjectByType<IntakeRoom>(FindObjectsInactive.Include);
-        if (room == null) return "missing (START GAME falls back to the old rules screen)";
-        return room.IsComplete ? null : "incomplete";
+        if (room == null)
+        {
+            return AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath) != null
+                ? "missing from the scene (Build Missing Pieces places the saved prefab)"
+                : "missing (START GAME falls back to the old rules screen)";
+        }
+        if (!room.IsComplete) return "incomplete";
+        if (!PrefabUtility.IsPartOfPrefabInstance(room.gameObject)) return $"not a prefab yet (Build Missing Pieces saves it as {PrefabPath})";
+        return null;
     }
 
-    [MenuItem("LIGHTS OUT/Build/Intake Room", priority = 105)]
+    /// <summary>The layout checks (light budget, clear walking paths, nothing through a wall) on the room as it is now - hand edits included. Report only.</summary>
+    public static string LayoutProblem()
+    {
+        IntakeRoom room = Object.FindAnyObjectByType<IntakeRoom>(FindObjectsInactive.Include);
+        return room == null ? null : AuditProblems(room.transform);
+    }
+
+    /// <summary>ProjectSetup's fix: place the saved prefab when the room is missing, or save a plain scene room as the prefab.</summary>
+    public static void Repair()
+    {
+        IntakeRoom room = Object.FindAnyObjectByType<IntakeRoom>(FindObjectsInactive.Include);
+        if (room == null) BuildSilently();
+        else if (!PrefabUtility.IsPartOfPrefabInstance(room.gameObject)) SaveAsPrefab(room.gameObject);
+    }
+
+    /// <summary>
+    /// Generates the room from scratch and saves it over the prefab - a reset, not the way to change the room. To change
+    /// it, open Assets/Prefabs/IntakeRoom.prefab and edit it by hand.
+    /// </summary>
+    [MenuItem("LIGHTS OUT/Build/Intake Room (regenerate)", priority = 105)]
     public static void Build()
     {
         Scene scene = SceneManager.GetActiveScene();
@@ -61,17 +87,23 @@ public static class IntakeRoomBuilder
             return;
         }
 
-        if (Object.FindAnyObjectByType<IntakeRoom>(FindObjectsInactive.Include) != null &&
-            !EditorUtility.DisplayDialog("Build Intake Room",
-                "An IntakeRoom already exists in this scene. Replace it? Any changes you made to it will be lost.", "Replace", "Cancel"))
+        bool hasPrefab = AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath) != null;
+        if ((hasPrefab || Object.FindAnyObjectByType<IntakeRoom>(FindObjectsInactive.Include) != null) &&
+            !EditorUtility.DisplayDialog("Regenerate Intake Room",
+                $"This throws away the current room and regenerates it from code, overwriting {PrefabPath}.\n\n" +
+                "Every change you made to it by hand will be lost. To change the room, edit the prefab instead.",
+                "Regenerate", "Cancel"))
         {
             return;
         }
 
-        BuildSilently();
+        Generate();
     }
 
-    /// <summary>No dialogs: replaces any existing room. Used by ProjectSetup and for scripted rebuilds.</summary>
+    /// <summary>
+    /// No dialogs, never overwrites hand work: when the prefab exists and the room is missing, it places the prefab;
+    /// it only generates from code when there is no prefab yet. Used by ProjectSetup and for scripted rebuilds.
+    /// </summary>
     public static void BuildSilently()
     {
         Scene scene = SceneManager.GetActiveScene();
@@ -81,6 +113,23 @@ public static class IntakeRoomBuilder
             return;
         }
 
+        if (AssetDatabase.LoadAssetAtPath<GameObject>(PrefabPath) != null)
+        {
+            if (Object.FindAnyObjectByType<IntakeRoom>(FindObjectsInactive.Include) == null)
+            {
+                InstantiatePrefab();
+                EditorSceneManager.MarkSceneDirty(scene);
+            }
+            return;
+        }
+
+        Generate();
+    }
+
+    /// <summary>Generates the room from code (replacing any existing one) and saves it as the prefab.</summary>
+    private static void Generate()
+    {
+        Scene scene = SceneManager.GetActiveScene();
         IntakeRoom existing = Object.FindAnyObjectByType<IntakeRoom>(FindObjectsInactive.Include);
         if (existing != null) Undo.DestroyObjectImmediate(existing.gameObject);
         GameObject stale;
@@ -110,6 +159,11 @@ public static class IntakeRoomBuilder
         Undo.RegisterCreatedObjectUndo(rootGo, "Build Intake Room");
         rootGo.transform.position = RoomPosition;
         _root = rootGo.transform;
+        _flickerSigns.Clear();
+        _soundPoints.Clear();
+        _table1 = _table1Max = _table2 = _table2Max = Vector3.zero;
+        _props = Group(_root, "Props");
+        _decals = Group(_root, "Decals");
 
         BuildShell(m);
         BuildFurniture();
@@ -135,19 +189,21 @@ public static class IntakeRoomBuilder
 
         // ---- lights
         Transform lights = Group(_root, "Lights");
-        Light mainLamp = PointLight(lights, "MainLamp", new Vector3(0f, 2.55f, 0f), Warm, 9f, 2.2f);
-        GameObject fixture = Prim(_root, PrimitiveType.Cube, "MainLampFixture", new Vector3(0f, 2.93f, 0f), new Vector3(0.7f, 0.1f, 0.4f), m.Lamp);
-        Object.DestroyImmediate(fixture.GetComponent<Collider>());
+        Light mainLamp = PointLight(lights, "MainLamp", new Vector3(0f, 2.55f, 0f), ColdWhite, 9f, 2.2f);
         Light lampB = PointLight(lights, "LampB", new Vector3(0f, 2.55f, 7.8f), Warm, 7f, 1.6f);
-        GameObject fixtureB = Prim(_root, PrimitiveType.Cube, "LampBFixture", new Vector3(0f, 2.93f, 7.8f), new Vector3(0.7f, 0.1f, 0.4f), m.Lamp);
-        Object.DestroyImmediate(fixtureB.GetComponent<Collider>());
-        Light lampC = PointLight(lights, "LampC", new Vector3(0f, 2.55f, 16.4f), Amber, 8f, 1.8f);
-        PointLight(lights, "CorridorLamp", new Vector3(3.3f, 2.4f, 9f), new Color(0.9f, 0.35f, 0.25f), 6f, 0.9f);
+        Light lampC = PointLight(lights, "LampC", new Vector3(0f, 2.3f, 16.4f), Amber, 8f, 1.8f);
+        Light corridorLamp = PointLight(lights, "CorridorLamp", new Vector3(3.3f, 2.4f, 9f), new Color(0.9f, 0.35f, 0.25f), 6f, 0.9f);
+        Renderer mainGlass = BuildCeilingFixture("MainLampFixture", new Vector3(0f, Height, 0f), 0f, GlassMat("Intake_GlassCold", ColdWhite, m.Lamp), m.Lamp);
+        BuildCeilingFixture("LampBFixture", new Vector3(0f, Height, 7.8f), 0f, GlassMat("Intake_GlassWarm", Warm, m.Lamp), m.Lamp);
+        Renderer corridorGlass = BuildCeilingFixture("CorridorFixture", new Vector3(3.3f, Height, 9f), 90f, GlassMat("Intake_RedGlass", new Color(1f, 0.12f, 0.08f), m.Lamp), m.Lamp);
+        Transform hanging;
+        Renderer hangingGlow;
+        BuildHangingLamp(lampC, new Vector3(0f, Height, 16.4f), m, out hanging, out hangingGlow);
 
         // ---- sign, bell, shutter
-        TextMeshPro sign = BuildSign(_root, "FocusSign", new Vector3(-2.3f, 1.9f, 3.46f), "KEEP QUIET.\nIT HEARS EVERYTHING.", new Color(0.82f, 0.8f, 0.7f), 1.7f);
-        IntakeTarget bell = BuildBell(m);
-        Transform shutter = BuildShutter(m);
+        TextMeshPro sign = BuildSign(_root, "FocusSign", new Vector3(-2.55f, 1.9f, 3.46f), "KEEP QUIET.\nIT HEARS EVERYTHING.", new Color(0.82f, 0.8f, 0.7f), 1.7f);
+        IntakeTarget bell = BuildBellKit(kit, m) ?? BuildBell(m);
+        Transform shutter = BuildShutterKit(kit, m) ?? BuildShutter(m);
 
         // ---- the live kit templates
         BatteryCellPickup battery = null;
@@ -163,11 +219,13 @@ public static class IntakeRoomBuilder
             {
                 battery = CloneKit(kit.BatteryCell, "IntakeBattery");
                 battery.transform.position = _root.TransformPoint(new Vector3(2.6f, 0.95f, 1.2f));
+                if (_table2Max != Vector3.zero) SeatAt(battery.gameObject, _table2Max.y + 0.002f); // stood on the table, not hovering
             }
             if (kit.ThrowableBottle != null)
             {
                 bottle = CloneKit(kit.ThrowableBottle, "IntakeBottle");
                 bottle.transform.position = _root.TransformPoint(new Vector3(2.5f, 0.95f, -1.9f));
+                if (_table1Max != Vector3.zero) SeatAt(bottle.gameObject, _table1Max.y + 0.002f);
             }
             if (kit.LoreNote != null)
             {
@@ -228,7 +286,7 @@ public static class IntakeRoomBuilder
         Wire(so, "roomBZone", roomBZone);
         Wire(so, "hatchZone", hatchZone);
         Wire(so, "mainLamp", mainLamp);
-        Wire(so, "mainLampFixture", fixture.GetComponent<Renderer>());
+        Wire(so, "mainLampFixture", mainGlass);
         Wire(so, "lampB", lampB);
         Wire(so, "lampC", lampC);
         Wire(so, "focusSign", sign);
@@ -253,9 +311,14 @@ public static class IntakeRoomBuilder
         Wire(so, "goalGlow", goalGlow);
         so.ApplyModifiedPropertiesWithoutUndo();
 
+        // ---- F91: the dressing, the ambience and the particles (no new lights; nothing here moves a tutorial point)
+        BuildDressing(rootGo);
+        WireAmbience(rootGo, corridorLamp, corridorGlass, lampC, hangingGlow, hanging);
+
         Selection.activeGameObject = rootGo;
         EditorSceneManager.MarkSceneDirty(scene);
         Debug.Log($"Intake room built. Save the scene (Ctrl+S) to keep it.\n{Audit(rootGo.transform)}", rootGo);
+        SaveAsPrefab(rootGo);
     }
 
     // ---------------------------------------------------------------- shell
@@ -308,17 +371,17 @@ public static class IntakeRoomBuilder
 
     private static void Slab(Transform parent, string name, float x0, float y0, float z0, float x1, float y1, float z1, Material mat)
     {
-        Box(parent, name, x0, y0, z0, x1, y1, z1, mat, true);
+        MetricBox(Box(parent, name, x0, y0, z0, x1, y1, z1, mat, true));
     }
 
     private static void WallBox(Transform parent, string name, float x0, float z0, float x1, float z1, Material mat)
     {
-        Box(parent, name, x0, 0f, z0, x1, Height, z1, mat, true);
+        MetricBox(Box(parent, name, x0, 0f, z0, x1, Height, z1, mat, true));
     }
 
     private static void Lintel(Transform parent, string name, float x0, float z0, float x1, float z1, Material mat)
     {
-        Box(parent, name, x0, 2.4f, z0, x1, Height, z1, mat, true);
+        MetricBox(Box(parent, name, x0, 2.4f, z0, x1, Height, z1, mat, true));
     }
 
     private static GameObject Box(Transform parent, string name, float x0, float y0, float z0, float x1, float y1, float z1, Material mat, bool collider)
@@ -335,11 +398,12 @@ public static class IntakeRoomBuilder
 
     // ---------------------------------------------------------------- pieces
 
-    private static TextMeshPro BuildSign(Transform root, string name, Vector3 localPosition, string text, Color color, float fontSize)
+    private static TextMeshPro BuildSign(Transform root, string name, Vector3 localPosition, string text, Color color, float fontSize, Quaternion? rotation = null)
     {
         GameObject go = new GameObject(name);
         go.transform.SetParent(root, false);
         go.transform.localPosition = localPosition;
+        if (rotation.HasValue) go.transform.localRotation = rotation.Value;
 
         TextMeshPro tmp = go.AddComponent<TextMeshPro>();
         if (TMP_Settings.defaultFontAsset != null) tmp.font = TMP_Settings.defaultFontAsset;
@@ -415,6 +479,8 @@ public static class IntakeRoomBuilder
             Object.DestroyImmediate(star.GetComponent<Collider>());
         }
         star.transform.localPosition = top;
+        // The star is ~1 m tall, so centring it 0.3 m over the top left its points inside the table: float it 0.1 m clear.
+        if (table != null) SeatAt(star, top.y - 0.3f + 0.1f);
         PointLight(star.transform, "StarLight", Vector3.zero, new Color(1f, 0.9f, 0.4f), 5f, 1.2f);
         return star.transform;
     }
@@ -497,15 +563,17 @@ public static class IntakeRoomBuilder
 
         // Room A: tables for the bottle and the battery, a cupboard, a chair.
         GameObject t1 = PlaceAgainst("Furniture/WoodTableSquare01", dressing, new Vector3(2.7f, 0f, -1.9f), 90f);
-        if (t1 != null) AddBlocker(t1, "TableBlocker");
+        if (t1 != null) { AddBlocker(t1, "TableBlocker"); _table1 = _root.InverseTransformPoint(AlchemistPack.RenderBounds(t1).min); _table1Max = _root.InverseTransformPoint(AlchemistPack.RenderBounds(t1).max); }
         GameObject t2 = PlaceAgainst("Furniture/WoodTableSquare01", dressing, new Vector3(2.7f, 0f, 1.2f), 90f);
-        if (t2 != null) AddBlocker(t2, "TableBlocker");
-        GameObject cupboard = PlaceAgainst("Furniture/WoodCupboard01", dressing, new Vector3(1.2f, 0f, -3.2f), 180f);
+        if (t2 != null) { AddBlocker(t2, "TableBlocker"); _table2 = _root.InverseTransformPoint(AlchemistPack.RenderBounds(t2).min); _table2Max = _root.InverseTransformPoint(AlchemistPack.RenderBounds(t2).max); }
+        // Yaw 0 puts the cupboard's doors toward the room (180 faced the wall).
+        GameObject cupboard = PlaceAgainst("Furniture/WoodCupboard01", dressing, new Vector3(1.2f, 0f, -3.2f), 0f);
         if (cupboard != null) AddBlocker(cupboard, "CupboardBlocker");
         PlaceAgainst("Furniture/Chair01", dressing, new Vector3(-1.2f, 0f, 1.6f), 70f);
 
         // Room B: drawers along the west wall.
-        GameObject drawers = PlaceAgainst("Furniture/Drawer01", dressing, new Vector3(-1.75f, 0f, 5.6f), 90f);
+        // Yaw 180 faces the drawers into the room; it is 0.78 m deep that way, so its centre sits 0.4 m off the wall face.
+        GameObject drawers = PlaceAgainst("Furniture/Drawer01", dressing, new Vector3(-1.6f, 0f, 5.6f), 180f);
         if (drawers != null) AddBlocker(drawers, "DrawerBlocker");
         GameObject cupboardB = PlaceAgainst("Furniture/WoodCupboard02", dressing, new Vector3(-1.7f, 0f, 11.0f), 90f);
         if (cupboardB != null) AddBlocker(cupboardB, "CupboardBlocker");
@@ -532,6 +600,7 @@ public static class IntakeRoomBuilder
         PrefabUtility.UnpackPrefabInstance(go, PrefabUnpackMode.Completely, InteractionMode.AutomatedAction);
         go.transform.localPosition = Vector3.zero;
         go.transform.localRotation = Quaternion.Euler(0f, yaw, 0f);
+        TrimVariants(go);
         foreach (MonoBehaviour mb in go.GetComponentsInChildren<MonoBehaviour>(true)) Object.DestroyImmediate(mb);
         AlchemistPack.Strip(go, true);
         AlchemistPack.FixDefaultMaterials(go);
@@ -643,7 +712,7 @@ public static class IntakeRoomBuilder
         sb.AppendLine($"  lights: {lights} (budget 7+star) {(lights <= 8 ? "OK" : "TOO MANY")}");
 
         Bounds b = new Bounds(root.position, Vector3.zero);
-        foreach (Renderer r in root.GetComponentsInChildren<Renderer>(true)) b.Encapsulate(r.bounds);
+        foreach (Renderer r in root.GetComponentsInChildren<Renderer>(true)) { if (!(r is ParticleSystemRenderer)) b.Encapsulate(r.bounds); }
         sb.AppendLine($"  bounds: {b.min} .. {b.max}");
 
         List<string> clashes = new List<string>();
@@ -659,6 +728,7 @@ public static class IntakeRoomBuilder
 
         IntakeRoom room = root.GetComponent<IntakeRoom>();
         sb.AppendLine($"  complete: {(room != null && room.IsComplete ? "OK" : "NO")}");
+        sb.Append(AuditPaths(root));
         return sb.ToString();
     }
 
@@ -685,6 +755,10 @@ public static class IntakeRoomBuilder
             Eyes = LoadOrCreate("Intake_Eyes", new Color(1f, 0.1f, 0.05f), new Color(1f, 0.1f, 0.05f) * 5f, 0.1f),
             Arrow = LoadOrCreateUnlit("Intake_Arrow", new Color(1f, 0.72f, 0.1f)),
         };
+        // F91 D1: the shell wears the Ward's own surfaces (the flat Intake_Wall/Floor/Ceiling stay as fallbacks).
+        m.Wall = WardMaterial("Ward_Wall", m.Wall);
+        m.Floor = WardMaterial("Ward_Floor", m.Floor);
+        m.Ceiling = WardMaterial("Ward_Ceiling", m.Ceiling);
         AssetDatabase.SaveAssets();
         return m;
     }
